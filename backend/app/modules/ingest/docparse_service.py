@@ -50,12 +50,15 @@ def ingest_pdf(
 
     # 先解析到临时文件，再按 notsure 决定落待审区还是直接入库
     tmp_md = settings.data_dir / f"_tmp_{stem}.md"
-    pdf_to_markdown(pdf_path, tmp_md)
+    pdf_to_markdown(pdf_path, tmp_md)  # 同时写 tmp_md.pagemap.json（行→PDF页 侧车）
     md_text = tmp_md.read_text(encoding="utf-8")
-    tmp_md.unlink(missing_ok=True)
+    tmp_pagemap = Path(str(tmp_md) + ".pagemap.json")
 
     n = count_notsure(md_text)
     if n > 0:
+        # 进待审区：清理临时产物（页码侧车在审核入库后由建树侧重算，见 review_service）
+        tmp_md.unlink(missing_ok=True)
+        tmp_pagemap.unlink(missing_ok=True)
         rec = save_pending(stem, md_text, original_name, kb)
         return {
             "document": stem,
@@ -71,6 +74,19 @@ def ingest_pdf(
     md_dir = settings.data_dir / "md" / kb
     md_dir.mkdir(parents=True, exist_ok=True)
     (md_dir / f"{stem}.md").write_text(md_text, encoding="utf-8")
+    # 页码侧车随 md 一起落到正式目录（建树时 annotate_pages 会读它给节点标页）
+    final_md = md_dir / f"{stem}.md"
+    if tmp_pagemap.exists():
+        shutil.move(str(tmp_pagemap), str(md_dir / f"{stem}.md.pagemap.json"))
+    tmp_md.unlink(missing_ok=True)
+    # OCR 原 PDF → <md>.ocr.json（扫描件文字框，供「原文 PDF」高亮被引用处）；失败不阻断入库
+    try:
+        from app.modules.ingest.ocr_locate import write_ocr_sidecar
+
+        n_boxes = write_ocr_sidecar(pdf_dir / f"{stem}.pdf", final_md)
+        log.info("ocr_sidecar_written", stem=stem, boxes=n_boxes)
+    except Exception:
+        log.exception("ocr_sidecar_failed", stem=stem)
     return {
         "document": stem,
         "kb": kb,

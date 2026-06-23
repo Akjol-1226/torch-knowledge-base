@@ -19,6 +19,29 @@ from .relevel import relevel_headings_with_llm
 logger = logging.getLogger(__name__)
 
 
+def _build_page_map(marked_markdown: str) -> list[list[int]]:
+    """据带 <!-- page: N --> 标记的 md，产出「剥离标记后 md 的行 → PDF 页码」映射。
+
+    返回 [[clean_line_1based, page], ...] 断点列表（仅在页号变化处记一条）。
+    行号口径与 page_index_md.extract_nodes_from_markdown 一致（按 '\\n' split、从 1 计、含空行），
+    故 treestore 可直接用节点 line_num 查所在页。扫描件无文字层，页码只能来自这里的页标记。
+    [torch 新增] 上游 pdf_vlm_md 无此逻辑；同步源项目时需保留本函数与下方落盘段（见 docparse-provenance）。
+    """
+    marker = re.compile(r"^<!-- page: (\d+) -->\s*$")
+    runs: list[list[int]] = []
+    clean_line = 0
+    page = 1
+    for line in marked_markdown.split("\n"):
+        m = marker.match(line.strip())
+        if m:
+            page = int(m.group(1))
+            continue
+        clean_line += 1
+        if not runs or runs[-1][1] != page:
+            runs.append([clean_line, page])
+    return runs
+
+
 def precompute_page_contexts(
     document_context: DocumentContext,
     page_raw_texts: dict[int, str],
@@ -269,19 +292,25 @@ def convert_pdf_to_markdown(
         pp_dir.mkdir(parents=True, exist_ok=True)
         (pp_dir / 'before_postprocess.md').write_text(raw, encoding='utf-8')
 
-    final = postprocess_markdown(raw, file_title, document_context, debug=debug)
+    # [torch 改动] 保留 <!-- page: N --> 页标记跑完 validate/repair，再据此产出「行→页」侧车，
+    # 最后才剥离标记写出正式 md——这样侧车行号与剥离后 md（= 建树输入）逐行对齐。
+    marked_md = postprocess_markdown(raw, file_title, document_context, debug=True)
 
+    report = validate_markdown(marked_md)
     if debug:
-        (debug_root / 'postprocess' / 'after_postprocess.md').write_text(final, encoding='utf-8')
-
-    report = validate_markdown(final)
-    if debug:
+        (debug_root / 'postprocess' / 'after_postprocess.md').write_text(marked_md, encoding='utf-8')
         (debug_root / 'validation_report.json').write_text(
             json.dumps({'errors': report.errors}, ensure_ascii=False, indent=2), encoding='utf-8'
         )
     if report.has_errors:
         logger.warning('Validation errors: %s', report.errors)
-        final = repair_markdown(final, report)
+        marked_md = repair_markdown(marked_md, report)
+
+    page_map = _build_page_map(marked_md)
+    final = marked_md if debug else re.sub(r'<!-- page: \d+ -->\n?', '', marked_md)
 
     Path(output_path).write_text(final, encoding='utf-8')
-    logger.info('Done → %s', output_path)
+    Path(str(output_path) + '.pagemap.json').write_text(
+        json.dumps(page_map, ensure_ascii=False), encoding='utf-8'
+    )
+    logger.info('Done → %s (page-map runs: %d)', output_path, len(page_map))

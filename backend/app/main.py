@@ -49,7 +49,8 @@ async def health() -> dict[str, str]:
 @app.get("/")
 def index() -> FileResponse:
     """dev：直接 serve 前端设计稿，浏览器开 http://localhost:8000/ 即同源使用（无 CORS 顾虑）。"""
-    return FileResponse(_MOCKUP)
+    # 禁缓存：dev 期改了前端不用清浏览器缓存（避免"看不到改动"）
+    return FileResponse(_MOCKUP, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 from app.modules.chat.router import router as chat_router  # noqa: E402

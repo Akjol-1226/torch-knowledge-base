@@ -62,9 +62,17 @@ def get_conversation(cid: str) -> dict | None:
 
 
 def append_turn(
-    cid: str, user_msg: str, assistant_msg: str, title_hint: str | None = None
+    cid: str,
+    user_msg: str,
+    assistant_msg: str,
+    sources: list | None = None,
+    title_hint: str | None = None,
 ) -> dict:
-    """追加一轮对话（user + assistant）；会话不存在则新建，标题取首条消息前 40 字。"""
+    """追加一轮对话（user + assistant）；会话不存在则新建，标题取首条消息前 40 字。
+
+    sources：本轮回答的结构化数据来源（[{doc_id,doc_name,nodes:[...]}]），随 assistant 消息一起存，
+    重开历史会话时前端据此重建「数据来源」按钮与右侧面板。
+    """
     d = _dir()
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{_safe_id(cid)}.json"
@@ -78,7 +86,9 @@ def append_turn(
             "messages": [],
         }
     rec["messages"].append({"role": "user", "content": user_msg, "ts": _now()})
-    rec["messages"].append({"role": "assistant", "content": assistant_msg, "ts": _now()})
+    rec["messages"].append(
+        {"role": "assistant", "content": assistant_msg, "ts": _now(), "sources": sources or []}
+    )
     rec["updated_at"] = _now()
     f.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info("conv_append", cid=rec["id"], turns=len(rec["messages"]) // 2)

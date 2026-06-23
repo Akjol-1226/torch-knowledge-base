@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.retrieval import build_index, iter_nodes
 from app.modules.ingest.catalog import build_card, make_doc_id
+from app.modules.ingest.page_locator import annotate_pages
 from app.modules.ingest.tree import build_tree
 
 log = get_logger("ingest.tree")
@@ -35,6 +36,8 @@ def ingest_dir(md_dir, out, model: str) -> dict:
         kb = rel.parts[0] if len(rel.parts) > 1 else "default"
         full_text = md_path.read_text(encoding="utf-8")
         tree = build_tree(str(md_path), model=model)
+        # 据 <md>.pagemap.json 给节点标注 PDF 页码（docparse 入库时落盘；裸 md 无侧车则跳过）
+        annotate_pages(md_path, tree["structure"])
         doc_id = make_doc_id(tree["doc_name"])
 
         doc = {

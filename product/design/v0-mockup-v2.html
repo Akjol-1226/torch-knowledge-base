@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -131,6 +132,26 @@
       font-size: 11.5px; color: #4a4a5e; line-height: 1.4; }
     .msg-ref-text b { font-weight: 600; color: #3a3550; }
     .msg-ref-meta { color: #9890b0; font-size: 11px; }
+    /* 每条回答下方的「数据来源」按钮：点开把本条回答的来源载入右侧面板 */
+    .msg-src-btn { font-size: 12px; color: #6d5bd0; background: #f1eefc; border: 1px solid #e4dcf7;
+      border-radius: 999px; padding: 3px 12px; cursor: pointer; transition: background .15s ease; }
+    .msg-src-btn:hover { background: #e4dcf7; }
+    /* 右侧来源条目展开的上下文 */
+    .ref-node-head { /* 行容器，承载徽章+meta+snippet+展开 */ }
+    .ref-expand { white-space: nowrap; color: #b9b0d6; font-size: 11px; }
+    .ref-context { margin-top: 6px; padding-left: 26px; }
+    .ctx-node { border-left: 2px solid #e5e7eb; padding: 4px 9px; margin: 5px 0; border-radius: 0 6px 6px 0; }
+    .ctx-node.ctx-cited { border-left-color: #8b79d4; background: #f6f3ff; }
+    .ctx-meta { font-size: 11px; color: #94a3b8; margin-bottom: 2px; }
+    .ctx-text { font-size: 12px; color: #475569; word-break: break-word; }
+    /* 来源浮层里的上下文：比右侧窄栏更宽松、字号更大，便于阅读 */
+    #src-view-ctx .ctx-node { border-left-width: 3px; padding: 8px 14px; margin: 10px 0; }
+    #src-view-ctx .ctx-text { font-size: 14px; color: #334155; line-height: 1.65; }
+    #src-view-ctx .ctx-meta { font-size: 12px; margin-bottom: 4px; }
+    /* 原文 PDF（PDF.js 渲染）里被引用处的高亮框 */
+    #pdf-overlay .pdf-hl { position: absolute; background: rgba(255,224,79,0.34);
+      outline: 2px solid rgba(234,179,8,0.85); border-radius: 2px; box-sizing: border-box; }
+    #pdf-canvas { display: block; }
 
     /* notsure 标记 */
     .notsure {
@@ -219,6 +240,19 @@
     #doc-view-md th, #doc-view-md td { border: 1px solid var(--hair); padding: 5px 8px; text-align: left; vertical-align: top; }
     #doc-view-md th { background: rgba(255,255,255,0.6); font-weight: 600; }
     #doc-view-md code { background: rgba(28,24,56,0.06); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+    /* 聊天答案 / 来源上下文：marked 渲染的 markdown 基础排版（含标题、表格） */
+    .md h1,.md h2,.md h3,.md h4 { font-weight: 600; color: #1e293b; margin: 12px 0 6px; line-height: 1.3; }
+    .md h1 { font-size: 17px; } .md h2 { font-size: 15px; } .md h3 { font-size: 14px; } .md h4 { font-size: 13px; }
+    .md p { margin: 6px 0; line-height: 1.6; }
+    .md ul { list-style: disc; margin: 6px 0; padding-left: 22px; }
+    .md ol { list-style: decimal; margin: 6px 0; padding-left: 22px; }
+    .md li { margin: 2px 0; }
+    .md strong { font-weight: 600; }
+    .md table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; display: block; overflow-x: auto; }
+    .md th, .md td { border: 1px solid var(--hair); padding: 5px 8px; text-align: left; vertical-align: top; }
+    .md th { background: rgba(255,255,255,0.6); font-weight: 600; }
+    .md code { background: rgba(28,24,56,0.06); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+    .md pre { background: rgba(28,24,56,0.06); padding: 8px; border-radius: 6px; overflow: auto; }
   </style>
 </head>
 
@@ -558,6 +592,44 @@
     </div>
   </div>
 
+  <!-- 数据来源上下文浮层：上下文（MD 渲染 + 被引用段高亮）/ 原文 PDF 跳到对应页 -->
+  <div id="src-modal" class="fixed inset-0 z-[60] hidden">
+    <div class="absolute inset-0 bg-slate-900/30 backdrop-blur-[2px]" data-src-close></div>
+    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92vw] max-w-3xl h-[80vh] surface-modal rounded-3xl flex flex-col overflow-hidden">
+      <div class="px-6 py-4 border-b border-[rgba(28,24,56,0.07)] flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <h2 id="src-modal-title" class="text-base font-semibold text-slate-800 truncate">数据来源</h2>
+          <p id="src-modal-sub" class="text-[11px] text-slate-400 mt-0.5"></p>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <div class="flex gap-1 bg-white/55 border border-white/85 rounded-full p-0.5" id="src-tabs">
+            <button class="src-tab px-3 py-1 text-[11px] font-bold rounded-full bg-white text-slate-700 shadow-sm hidden" data-src-tab="pdf">原文 PDF</button>
+            <button class="src-tab px-3 py-1 text-[11px] font-medium rounded-full text-slate-500" data-src-tab="ctx">上下文</button>
+          </div>
+          <button class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-[rgba(28,24,56,0.05)] flex items-center justify-center transition" data-src-close title="关闭">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-hidden bg-white/30">
+        <div id="src-view-ctx" class="h-full overflow-y-auto custom-scrollbar px-7 py-5"></div>
+        <div id="src-view-pdf" class="hidden h-full flex flex-col">
+          <div class="flex items-center justify-center gap-3 py-2 border-b border-[rgba(28,24,56,0.07)] text-xs text-slate-500 flex-shrink-0">
+            <button id="pdf-prev" class="btn-ghost !py-1 !px-2.5" title="上一页">◀</button>
+            <span id="pdf-pageinfo" class="tabular-nums">—</span>
+            <button id="pdf-next" class="btn-ghost !py-1 !px-2.5" title="下一页">▶</button>
+          </div>
+          <div id="pdf-canvas-wrap" class="flex-1 overflow-auto custom-scrollbar bg-slate-200/60 flex justify-center items-start py-4">
+            <div id="pdf-page-holder" class="relative shadow-lg bg-white">
+              <canvas id="pdf-canvas"></canvas>
+              <div id="pdf-overlay" class="absolute left-0 top-0 pointer-events-none"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     /* ============================================================
        1. 视图切换框架（由左栏导航驱动）
@@ -629,8 +701,8 @@
     const escapeHtml = s => String(s).replace(/[&<>"']/g,
       c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-    // 轻量 markdown：段落 / 有序&无序列表 / 加粗（不引入 CDN 依赖）
-    function renderMarkdown(text){
+    // marked 未加载时的兜底：段落 / 列表 / 加粗
+    function _mdLite(text){
       const lines = escapeHtml(text).split('\n');
       let html = '', inUl = false, inOl = false;
       const closeLists = () => { if(inUl){html+='</ul>';inUl=false;} if(inOl){html+='</ol>';inOl=false;} };
@@ -646,15 +718,47 @@
         else { closeLists(); html += '<p class="my-1">'+line+'</p>'; }
       }
       closeLists();
-      return replaceCiteMarkers(html);
+      return html;
     }
 
-    // 把正文里的 [[cite:handle]] 换成可点上标；handle 不在 citeIndex（即不在 sources）则降级丢弃，绝不造卡
-    function replaceCiteMarkers(html){
-      return html.replace(/\[\[cite:([^\]]+)\]\]/g, (m, handle) => {
+    // markdown → HTML：优先用已加载的 marked（支持标题/表格等），否则兜底
+    function mdToHtml(text){
+      return window.marked ? marked.parse(String(text || '')) : _mdLite(text);
+    }
+
+    // 渲染聊天答案：先把 [[cite:handle]] 用占位符保护（避免被 marked 误解析），渲染后再换成可点上标
+    function renderMarkdown(text){
+      const marks = [];
+      const protectedText = String(text || '').replace(/\[\[cite:([^\]]+)\]\]/g, (m, h) => {
+        marks.push(h); return '@@CITE' + (marks.length - 1) + '@@';
+      });
+      let html = mdToHtml(protectedText);
+      html = html.replace(/@@CITE(\d+)@@/g, (m, i) => {
+        const handle = marks[+i];
         const num = citeIndex[handle];
-        if(!num) return '';
+        if(num == null) return '';   // handle 不在 sources → 降级丢弃；编号从 1 起，不会误判
         return `<sup class="cite-badge cite-anchor" data-handle="${escapeHtml(handle)}" data-ref="${num}">${num}</sup>`;
+      });
+      return html;
+    }
+
+    // 在已渲染的 DOM 里按问题关键词高亮：只动文本节点，不破坏 markdown 结构/HTML
+    function highlightEl(root, query){
+      const terms = (query || '').split(/[^一-龥A-Za-z0-9]+/).filter(t => t.length >= 2 && /[一-龥]/.test(t));
+      if(!terms.length) return;
+      terms.sort((a, b) => b.length - a.length);
+      const re = new RegExp(terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+      const targets = [];
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while(walk.nextNode()){
+        const v = walk.currentNode.nodeValue;
+        re.lastIndex = 0;
+        if(v && re.test(v)) targets.push(walk.currentNode);
+      }
+      targets.forEach(n => {
+        const span = document.createElement('span');
+        span.innerHTML = escapeHtml(n.nodeValue).replace(re, m => '<mark class="cite-hl">' + m + '</mark>');
+        n.replaceWith(span);
       });
     }
 
@@ -726,6 +830,8 @@
     // handle -> 引用编号；由 renderRefs 在 answer 时构建，右侧卡片与正文上标共用同一套编号
     let citeIndex = {};
     let lastQuery = '';  // 本轮用户问题，用于右侧 snippet 关键词高亮
+    const msgSources = {};  // mid -> {refs, query}：每条回答各自保存数据来源，互不覆盖（修右侧来源被新问题冲掉的 bug）
+    let _midSeq = 0;
 
     // 右侧 snippet 里把用户问题的关键词（含中文、≥2字）标黄。先 escape 再替换，仅匹配含中文的词避免破坏 HTML 实体
     function highlightTerms(text, query){
@@ -757,66 +863,88 @@
         .forEach(el => el.classList.add('active'));
     }
 
-    // sources 结构：[{doc_id, doc_name, nodes:[{handle, section, lines, snippet}]}]
-    // 同一文档只渲染一张卡（诉求1：去重在后端按 doc_id 分组、node 按 handle 去重）
-    // 从全量检索来源中挑出正文实际引用的 node（与正文上标对应）；正文零引用/无匹配则回退全量
-    function pickCitedSources(sources, usedHandles){
-      sources = sources || [];
-      if(usedHandles && usedHandles.size){
-        const picked = sources
-          .map(doc => ({ ...doc, nodes: (doc.nodes || []).filter(nd => usedHandles.has(nd.handle)) }))
-          .filter(doc => doc.nodes.length);
-        if(picked.length) return picked;
-      }
-      return sources;
+    // 从答案正文里取出实际引用的 node handle（[[cite:handle]]）
+    function citedHandles(text){
+      const used = new Set();
+      const re = /\[\[cite:([^\]]+)\]\]/g; let m;
+      while((m = re.exec(text || '')) !== null) used.add(m[1]);
+      return used;
     }
 
-    // 在 AI 回答气泡下方渲染引用面包屑：本条回答引用了哪些来源，点击联动右侧。复用 citeIndex 编号
-    function renderMsgRefs(shell, sources){
-      const items = [];
-      (sources || []).forEach(doc => (doc.nodes || []).forEach(nd => {
-        const num = citeIndex[nd.handle] || '';
-        const meta = [nd.section, nd.lines ? '行' + nd.lines : ''].filter(Boolean).join(' · ');
-        items.push('<button class="msg-ref-item" data-handle="' + escapeHtml(nd.handle || '') + '">'
-          + '<span class="cite-badge" data-ref="' + num + '">' + num + '</span>'
-          + '<span class="msg-ref-text"><b>' + escapeHtml(doc.doc_name || '') + '</b>'
-          + (meta ? '<span class="msg-ref-meta">' + escapeHtml(meta) + '</span>' : '')
-          + '</span></button>');
-      }));
+    // sources 结构：[{doc_id, doc_name, nodes:[{handle, section, lines, snippet}]}]
+    // 只保留正文实际引用到的 node（与正文上标严格对应）；没引用到的不进数据来源、也不计数。
+    // 正文零引用 → 返回 []（数据来源面板显示"未引用"，不再回退展示全量检索结果）。
+    function pickCitedSources(sources, usedHandles){
+      sources = sources || [];
+      if(!usedHandles || !usedHandles.size) return [];
+      return sources
+        .map(doc => ({ ...doc, nodes: (doc.nodes || []).filter(nd => usedHandles.has(nd.handle)) }))
+        .filter(doc => doc.nodes.length);
+    }
+
+    // 在 AI 回答下方放「📎 数据来源 · N」按钮：把本条回答的来源单独存住（不被新问题覆盖），
+    // 点按钮再把它载入右侧面板。
+    function attachSourcesButton(shell, sources, query){
+      let count = 0;
+      (sources || []).forEach(d => count += (d.nodes || []).length);
       let box = shell.wrap.querySelector('.msg-refs');
-      if(!items.length){ if(box) box.remove(); return; }
+      if(!count){ if(box) box.remove(); return; }
+      const mid = 'm' + (++_midSeq);
+      msgSources[mid] = { refs: sources, query: query || '' };
       if(!box){
-        box = document.createElement('details');  // 默认折叠：不强制占空间，但入口常在
+        box = document.createElement('div');
         box.className = 'msg-refs';
         shell.body.insertAdjacentElement('afterend', box);
       }
-      box.innerHTML = '<summary class="msg-refs-sum">来源 · ' + items.length + ' 处</summary>'
-        + '<div class="msg-refs-body">' + items.join('') + '</div>';
+      box.innerHTML = '<button class="msg-src-btn" data-mid="' + mid + '">📎 数据来源 · ' + count + '</button>';
     }
 
-    function renderRefs(sources){
-      sources = sources || [];
+    // 点某条回答的「数据来源」按钮：用它自己存的来源重填右侧面板（含编号、可展开上下文）
+    function openSources(mid){
+      const s = msgSources[mid];
+      if(!s) return;
+      renderRefs(s.refs, s.query);
+    }
+
+    // 用 sources 建 handle->编号 映射（正文 [[cite]] 上标 与 右侧面板 共用同一编号）。
+    // 不渲染面板，单独抽出来，供「重开历史会话时按条重建编号」复用。
+    function buildCiteIndex(sources){
       citeIndex = {};
-      refCount.textContent = '数据来源 · ' + sources.length;
-      if(!sources.length){
+      let idx = 0;
+      (sources || []).forEach(doc => (doc.nodes || []).forEach(nd => {
+        idx += 1;
+        if(nd.handle) citeIndex[nd.handle] = idx;
+      }));
+      return idx;
+    }
+
+    function renderRefs(sources, query){
+      sources = sources || [];
+      if(query != null) lastQuery = query;   // 用本条回答的问题做 snippet/上下文关键词高亮
+      buildCiteIndex(sources);
+      const nodeCount = sources.reduce((s, d) => s + ((d.nodes || []).length), 0);
+      refCount.textContent = '数据来源 · ' + nodeCount;   // 数被引用的 node（与正文上标/按钮一致）
+      if(!nodeCount){
         refList.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">本次回答未引用文档</p>';
         return;
       }
       refList.innerHTML = '';
-      let idx = 0;  // node 全局序号，跨文档累加 → 正文上标据此编号
+      let idx = 0;  // 与 buildCiteIndex 同序累加 → 与正文上标编号一致
       sources.forEach(doc => {
         const card = document.createElement('div');
         card.className = 'ref-card glass-soft rounded-2xl p-4 shadow-sm transition';
         card.dataset.docId = doc.doc_id || '';
         const nodesHtml = (doc.nodes || []).map(nd => {
           idx += 1;
-          if(nd.handle) citeIndex[nd.handle] = idx;
           const meta = [nd.section, nd.lines ? ('行' + nd.lines) : ''].filter(Boolean).join(' · ');
-          return `<div class="ref-node flex items-start gap-2 mt-2" data-handle="${escapeHtml(nd.handle || '')}">
-              <span class="cite-badge" data-ref="${idx}">${idx}</span>
-              <div class="flex-1 min-w-0">
-                <p class="text-[12px] text-slate-600 leading-snug">${escapeHtml(meta)}</p>
-                <p class="ref-snippet text-[11px] text-slate-400 mt-0.5">${highlightTerms(nd.snippet || '', lastQuery)}</p>
+          return `<div class="ref-node mt-2" data-handle="${escapeHtml(nd.handle || '')}">
+              <div class="ref-node-head flex items-start gap-2">
+                <span class="cite-badge" data-ref="${idx}">${idx}</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-[12px] text-slate-600 leading-snug">${escapeHtml(meta)}</p>
+                  <p class="ref-snippet text-[11px] text-slate-400 mt-0.5">${highlightTerms(nd.snippet || '', lastQuery)}</p>
+                </div>
+                <span class="ref-expand mt-0.5">查看 ↗</span>
               </div>
             </div>`;
         }).join('');
@@ -824,6 +952,118 @@
         refList.appendChild(card);
       });
     }
+
+    // ── 数据来源上下文浮层：上下文（MD 渲染 + 被引用段高亮）/ 原文 PDF（PDF.js 跳页 + OCR 高亮）──
+    const srcModal = document.getElementById('src-modal');
+    if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    let srcPdf = null;            // {url, page, rects:[{page,x0,y0,x1,y1}]}：当前来源的原文 PDF 定位
+    let pdfDoc = null, pdfCurUrl = null, pdfCurPage = 1, pdfTotal = 0;  // PDF.js 渲染态
+    function closeSrcModal(){ srcModal.classList.add('hidden'); }
+
+    function setSrcTab(tab){
+      document.querySelectorAll('#src-tabs .src-tab').forEach(b => {
+        const on = b.dataset.srcTab === tab;
+        b.classList.toggle('bg-white', on); b.classList.toggle('text-slate-700', on);
+        b.classList.toggle('font-bold', on); b.classList.toggle('shadow-sm', on);
+        b.classList.toggle('text-slate-500', !on); b.classList.toggle('font-medium', !on);
+      });
+      document.getElementById('src-view-ctx').classList.toggle('hidden', tab !== 'ctx');
+      document.getElementById('src-view-pdf').classList.toggle('hidden', tab !== 'pdf');
+      if(tab === 'pdf' && srcPdf) loadAndRenderPdf(srcPdf.url, srcPdf.page);  // 切到 PDF 才加载
+    }
+
+    // 用 PDF.js 渲染 PDF 的第 page 页（扫描件直接栅格化），并叠加 OCR 高亮框
+    async function loadAndRenderPdf(url, page){
+      const wrap = document.getElementById('pdf-canvas-wrap');
+      if(!window.pdfjsLib){ wrap.innerHTML = '<p class="text-sm text-slate-400 py-8">PDF 组件未加载</p>'; return; }
+      try{
+        if(pdfCurUrl !== url || !pdfDoc){
+          pdfCurUrl = url;
+          pdfDoc = await pdfjsLib.getDocument(url).promise;
+          pdfTotal = pdfDoc.numPages;
+        }
+        await renderPdfPage(Math.min(Math.max(page || 1, 1), pdfTotal));
+      }catch(err){
+        wrap.innerHTML = '<p class="text-sm text-red-400 py-8">PDF 加载失败</p>';
+      }
+    }
+    async function renderPdfPage(n){
+      pdfCurPage = n;
+      const pg = await pdfDoc.getPage(n);
+      const wrap = document.getElementById('pdf-canvas-wrap');
+      const base = pg.getViewport({scale: 1});
+      const scale = Math.max(0.2, Math.min((wrap.clientWidth - 24) / base.width, 3));
+      const vp = pg.getViewport({scale});
+      const canvas = document.getElementById('pdf-canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      await pg.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+      // OCR 高亮框：rects 为页内归一化坐标(0..1)，按当前页过滤后叠加
+      const ov = document.getElementById('pdf-overlay');
+      ov.style.width = vp.width + 'px'; ov.style.height = vp.height + 'px';
+      ov.innerHTML = ((srcPdf && srcPdf.rects) || []).filter(r => r.page === n).map(r =>
+        `<div class="pdf-hl" style="left:${r.x0*100}%;top:${r.y0*100}%;width:${(r.x1-r.x0)*100}%;height:${(r.y1-r.y0)*100}%"></div>`
+      ).join('');
+      document.getElementById('pdf-pageinfo').textContent = n + ' / ' + pdfTotal;
+    }
+    document.getElementById('pdf-prev').addEventListener('click', () => { if(pdfDoc && pdfCurPage > 1) renderPdfPage(pdfCurPage - 1); });
+    document.getElementById('pdf-next').addEventListener('click', () => { if(pdfDoc && pdfCurPage < pdfTotal) renderPdfPage(pdfCurPage + 1); });
+
+    // 点右侧来源条 → 居中浮层：拉该节点上下文（本节点 + 相邻/section.span），整段高亮被引用处
+    async function openSrcModal(handle){
+      if(!handle) return;
+      srcModal.classList.remove('hidden');
+      srcPdf = null;
+      const ctxBox = document.getElementById('src-view-ctx');
+      document.querySelector('#src-tabs [data-src-tab="pdf"]').classList.add('hidden');
+      setSrcTab('ctx');
+      document.getElementById('src-modal-title').textContent = '加载中…';
+      document.getElementById('src-modal-sub').textContent = '';
+      ctxBox.innerHTML = '<p class="text-sm text-slate-400 py-8 text-center">加载上下文…</p>';
+      try{
+        const data = await (await fetch(API_BASE + '/chat/node?handle=' + encodeURIComponent(handle))).json();
+        if(data.error){ ctxBox.innerHTML = '<p class="text-sm text-red-400 py-8 text-center">' + escapeHtml(data.error) + '</p>'; return; }
+        document.getElementById('src-modal-title').textContent = data.doc_name || '数据来源';
+        const cited = (data.context || []).find(c => c.is_cited) || {};
+        // 面包屑/溯源：path = "文档 > 章 > 节 > 当前节点"，显示到源头的完整链(含文档名)。
+        // 仅去掉相邻重复项(根节点常与文档同名),不再砍首段,确保溯源到源头。
+        const raw = (data.path || '').split('>').map(s => s.trim()).filter(Boolean);
+        const dedup = raw.filter((s, i) => i === 0 || s !== raw[i - 1]);
+        const crumb = dedup.join('  ›  ') || cited.section || '';
+        const extra = [cited.lines ? ('行' + cited.lines) : '', data.page ? ('第 ' + data.page + ' 页') : ''].filter(Boolean).join(' · ');
+        document.getElementById('src-modal-sub').textContent = '🔖 ' + crumb + (extra ? ('   ·   ' + extra) : '');
+        // 只展示被引用的那一段（不再带前后文）；万一没标 is_cited 才退回整段上下文
+        const citedItems = (data.context || []).filter(c => c.is_cited);
+        const items = citedItems.length ? citedItems : (data.context || []);
+        ctxBox.innerHTML = items.map(c => {
+          const meta = [c.section, c.lines ? ('行' + c.lines) : '', c.page ? ('第' + c.page + '页') : ''].filter(Boolean).join(' · ');
+          return '<div class="ctx-node ctx-cited">'
+            + '<p class="ctx-meta">' + escapeHtml(meta) + '</p>'
+            + '<div class="ctx-text md">' + mdToHtml(c.text || '') + '</div>'
+            + '</div>';
+        }).join('') || '<p class="text-sm text-slate-400 py-8 text-center">无内容</p>';
+        ctxBox.querySelectorAll('.ctx-text').forEach(el => highlightEl(el, lastQuery));  // 渲染后再按关键词高亮
+        // 原文 PDF：需 doc_id + page（扫描件页码来自 VLM 入库侧车；缺其一则不显示该 tab）
+        if(data.doc_id && data.page){
+          srcPdf = {
+            url: API_BASE + '/ingest/document/' + encodeURIComponent(data.doc_id) + '/pdf',
+            page: data.page,
+            rects: data.rects || [],   // OCR 匹配出的被引用处高亮框（页内归一化坐标）
+          };
+          document.querySelector('#src-tabs [data-src-tab="pdf"]').classList.remove('hidden');
+          setSrcTab('pdf');   // 默认优先展示原文 PDF；用户可切回「上下文」
+        }
+      }catch(err){
+        ctxBox.innerHTML = '<p class="text-sm text-red-400 py-8 text-center">加载失败，关闭后重试</p>';
+      }
+    }
+    srcModal.addEventListener('click', e => {
+      if(e.target.closest('[data-src-close]')){ closeSrcModal(); return; }
+      const tab = e.target.closest('.src-tab'); if(tab) setSrcTab(tab.dataset.srcTab);
+    });
+    document.addEventListener('keydown', e => {
+      if(e.key === 'Escape' && !srcModal.classList.contains('hidden')) closeSrcModal();
+    });
 
     /* ============================================================
        会话管理：列表 / 新建 / 加载历史 / 删除（接 /chat/conversations）
@@ -879,17 +1119,23 @@
         chatStarted = true;
         chatStream.innerHTML = '';
         conversationHistory = [];
-        citeIndex = {};  // 历史会话未存结构化 sources，清空避免沿用上一会话编号误标（标记会降级隐藏）
+        let lastRefs = null;
         (rec.messages || []).forEach(m => {
           if(m.role === 'user'){
             addUserMsg(m.content);
             conversationHistory.push({role:'user', content:m.content});
           } else {
             const ai = createAiShell();
+            const refs = pickCitedSources(m.sources || [], citedHandles(m.content));  // 只留正文引用到的
+            buildCiteIndex(refs);                 // 用本条来源建编号，使本条 [[cite]] 上标正确显示
+            ai.body.classList.add('md');
             ai.body.innerHTML = renderMarkdown(m.content);
+            attachSourcesButton(ai, refs, '');    // 重建「数据来源」按钮（来源已随会话持久化）
+            if(refs.length) lastRefs = refs;
             conversationHistory.push({role:'assistant', content:m.content});
           }
         });
+        renderRefs(lastRefs || []);               // 右侧面板回填最后一条回答的来源
         loadConversations();
       }catch{ /* 忽略 */ }
     }
@@ -950,13 +1196,11 @@
             } else if(ev.type === 'answer'){
               const answerText = ev.text || streamText || '（无内容）';
               // 收集正文实际引用的 node（[[cite:handle]]）；右侧与本条面包屑只显示这些，与正文严格对应
-              const used = new Set();
-              const reCite = /\[\[cite:([^\]]+)\]\]/g; let mc;
-              while((mc = reCite.exec(answerText)) !== null) used.add(mc[1]);
-              const refs = pickCitedSources(ev.sources, used);
-              renderRefs(refs);                        // 右侧面板（建 citeIndex）
-              ai.body.innerHTML = renderMarkdown(answerText);  // 正文上标据 citeIndex
-              renderMsgRefs(ai, refs);                 // 本条回答下方的引用面包屑
+              const refs = pickCitedSources(ev.sources, citedHandles(answerText));
+              renderRefs(refs, q);                     // 右侧面板（建 citeIndex）
+              ai.body.classList.add('md');
+              ai.body.innerHTML = renderMarkdown(answerText);  // 正文上标据 citeIndex（marked 渲染标题/表格）
+              attachSourcesButton(ai, refs, q);        // 本条回答下方「数据来源」按钮（单独存住，不被新问题覆盖）
               if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已完成';
               conversationHistory.push({role:'user', content:q});
               conversationHistory.push({role:'assistant', content:ev.text||''});
@@ -976,12 +1220,16 @@
     if(chatSend) chatSend.addEventListener('click', sendChat);
     // 引用联动：点正文上标 / 右侧来源条目 → 双向定位高亮
     document.addEventListener('click', e => {
+      const srcBtn = e.target.closest('.msg-src-btn');
+      if(srcBtn){ openSources(srcBtn.dataset.mid); return; }   // 点回答下方「数据来源」按钮 → 载入该条来源
       const anchor = e.target.closest('.cite-anchor');
       if(anchor){ focusCite(anchor.dataset.handle); return; }
-      const item = e.target.closest('.msg-ref-item');
-      if(item){ focusCite(item.dataset.handle); return; }
-      const node = e.target.closest('#ref-list .ref-node');
-      if(node){ focusCite(node.dataset.handle); }
+      const head = e.target.closest('#ref-list .ref-node-head');
+      if(head){                                                // 点右侧来源条 → 联动高亮 + 居中浮层看上下文/原文 PDF
+        const node = head.closest('.ref-node');
+        focusCite(node.dataset.handle);
+        openSrcModal(node.dataset.handle);
+      }
     });
     // 中文/日文输入法合成期间(选候选词)按回车应是"选词"而非发送。
     // isComposing / keyCode 229 是合成中标志(Safari 下 isComposing 不可靠，故同时用手动标志兜底)。

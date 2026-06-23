@@ -17,7 +17,7 @@ from app.core.logging import get_logger
 from app.modules.chat import conversation_service
 from app.modules.chat.agent import build_agent
 from app.modules.chat.sse import events_from_astream
-from app.modules.chat.tools import current_kbs
+from app.modules.chat.tools import current_kbs, get_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 log = get_logger("chat")
@@ -81,6 +81,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）
         log.info("chat_query", turn=turn, turns=len(req.history or []), msg=req.message[:200])
         answer_text = ""
+        answer_sources: list = []
         try:
             astream = get_agent().astream(
                 {"messages": _build_messages(req)},
@@ -89,6 +90,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             async for ev in events_from_astream(astream):
                 if ev.get("type") == "answer":
                     answer_text = ev.get("text") or answer_text
+                    answer_sources = ev.get("sources") or answer_sources
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         except Exception:
             log.exception("chat_stream_failed", turn=turn)
@@ -104,6 +106,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     req.conversation_id,
                     req.message,
                     answer_text,
+                    answer_sources,
                 )
             except Exception:
                 log.exception("conv_persist_failed", turn=turn)
@@ -113,6 +116,78 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/node")
+async def node_context(handle: str) -> JSONResponse:
+    """取某节点的上下文：本节点 + 相邻（优先同名窗口 section.span，否则 prev/本/next）。
+    供前端「点开数据来源」时展示这一段的上下文，并高亮被引用的本节点（is_cited=true）。
+    """
+
+    def _build():
+        store = get_store()
+        node = store.read_node(handle)
+        if "error" in node:
+            return None
+        sec = node.get("section") or {}
+        span = sec.get("span")
+        handles = list(span) if span else [
+            h for h in (node.get("prev_id"), handle, node.get("next_id")) if h
+        ]
+        # 兜底：被点的 handle 必须在上下文里，否则前端会没有任何 is_cited 高亮
+        if handle not in handles:
+            handles.insert(0, handle)
+        ctx = []
+        for h in handles:
+            n = store.read_node(h)
+            if "error" in n:
+                continue
+            cite = n.get("cite", {})
+            ctx.append(
+                {
+                    "handle": h,
+                    "section": n.get("title", ""),
+                    "lines": cite.get("lines", ""),
+                    "page": cite.get("page"),
+                    "text": n.get("text", ""),
+                    "is_cited": h == handle,
+                }
+            )
+        cited_cite = node.get("cite", {})
+        doc_id = cited_cite.get("doc_id", "")
+        page = cited_cite.get("page")
+        # OCR 高亮:用被引用节点标题+正文去匹配 PDF 各页文字框 → 原文上画框（无侧车/匹配不到则 []）
+        rects: list = []
+        if doc_id and page:
+            from app.modules.ingest import document_service, ocr_locate, page_locator
+
+            md_path = document_service.get_md_path(doc_id)
+            ocr = ocr_locate.load_ocr(md_path) if md_path else None
+            if ocr:
+                # 节点正文常跨多页：据行范围算页跨度,逐页高亮内容（拿不到侧车则退回单页）
+                parts = (cited_cite.get("lines") or "").split("-")
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    span = page_locator.page_span(md_path, int(parts[0]), int(parts[1]))
+                    pages = span or [page]
+                else:
+                    pages = [page]
+                rects = ocr_locate.rects_for_node(
+                    ocr, pages, node.get("title", ""), node.get("text", "")
+                )
+        return {
+            "handle": handle,
+            "doc_name": cited_cite.get("doc", ""),
+            "doc_id": doc_id,
+            "page": page,  # 被引用节点所在 PDF 页（前端「原文 PDF」跳页用）
+            "path": node.get("path", ""),  # 引用链/溯源面包屑：文档 > 章 > 节 > 当前节点
+            "rects": rects,  # 被引用处高亮框（页内归一化坐标）
+            "context": ctx,
+        }
+
+    data = await run_in_threadpool(_build)
+    if data is None:
+        return JSONResponse({"error": "节点不存在"}, status_code=404)
+    return JSONResponse(data)
 
 
 @router.get("/conversations")

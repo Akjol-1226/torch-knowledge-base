@@ -31,6 +31,11 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./torch_kb.db"
 
+    # 对话系统提示词的路径 override（默认空 → 用 modules/chat/prompts/system.md）。
+    # 提示词正文是版本化资产、放仓库文件里（改 .md 即可，重启生效）；这里只存可选指针，
+    # 用于切换/灰度不同提示词，不要把大段正文塞进 env。
+    chat_system_prompt_path: str = ""
+
     def apply_litellm_env(self) -> None:
         """把 LiteLLM Proxy 凭证写进 OPENAI_* env。
 

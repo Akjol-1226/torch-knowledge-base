@@ -59,6 +59,7 @@ class TreeStore:
                     "handle": h, "doc_id": doc_id, "doc_name": doc_name, "kb": doc_kb,
                     "title": n.get("title", ""), "summary": n.get("summary", "") or "",
                     "text": n.get("text", "") or "", "line_num": n.get("line_num", 0),
+                    "page": n.get("page"),
                     "parent": parent_handle, "path_titles": my_path,
                     "child_handles": [], "prev": None, "next": None,
                 }
@@ -115,7 +116,7 @@ class TreeStore:
         out = {
             "id": node_id, "title": n["title"], "text": n["text"],
             "cite": {"doc": n["doc_name"], "section": n["title"], "lines": n.get("lines", ""),
-                     "handle": node_id, "doc_id": n["doc_id"],
+                     "handle": node_id, "doc_id": n["doc_id"], "page": n.get("page"),
                      "snippet": make_snippet(n["text"], "")},
             "path": " > ".join(n["path_titles"]),
             "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
@@ -197,7 +198,7 @@ class TreeStore:
                 "id": h, "title": n["title"], "score": hit["score"],
                 "snippet": snip,
                 "cite": {"doc": n["doc_name"], "section": n["title"], "lines": n.get("lines", ""),
-                         "handle": h, "doc_id": n["doc_id"], "snippet": snip},
+                         "handle": h, "doc_id": n["doc_id"], "page": n.get("page"), "snippet": snip},
                 "path": " > ".join(n["path_titles"]),
                 "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
             }

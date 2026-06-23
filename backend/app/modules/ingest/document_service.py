@@ -51,6 +51,12 @@ def get_document(doc_id: str) -> dict | None:
     }
 
 
+def get_md_path(doc_id: str) -> Path | None:
+    """文档解析后 md 的路径（OCR/页码侧车与它同目录同名）。无则 None。"""
+    doc = _load(doc_id)
+    return Path(doc["path"]) if doc else None
+
+
 def get_pdf_file(doc_id: str) -> Path | None:
     """原 PDF 文件路径（无则 None）。"""
     doc = _load(doc_id)
@@ -68,6 +74,8 @@ def delete_document(doc_id: str) -> dict:
     md_path = Path(doc["path"])
     if md_path.exists():
         md_path.unlink()
+    Path(str(md_path) + ".pagemap.json").unlink(missing_ok=True)  # 一并删页码侧车，避免孤儿
+    Path(str(md_path) + ".ocr.json").unlink(missing_ok=True)      # 一并删 OCR 侧车
     pdf = _pdf_path(doc)
     if pdf.exists():
         pdf.unlink()
