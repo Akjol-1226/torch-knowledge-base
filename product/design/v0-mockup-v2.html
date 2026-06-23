@@ -115,6 +115,22 @@
     .ref-node.active { background: rgba(139,121,212,.16); }
     .ref-card.active { outline: 2px solid #c9bdf0; outline-offset: 1px; }
     mark.cite-hl { background: #fff3b0; color: inherit; padding: 0 1px; border-radius: 2px; }
+    /* 消息下方的引用来源（默认折叠，不强制展开；展开后完整不截断） */
+    .msg-refs { margin-top: 8px; }
+    .msg-refs-sum { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 11px; color: #8478a8; list-style: none; user-select: none; padding: 2px 0; }
+    .msg-refs-sum::-webkit-details-marker { display: none; }
+    .msg-refs-sum::before { content: '▸'; display: inline-block; transition: transform .15s ease; }
+    .msg-refs[open] .msg-refs-sum::before { transform: rotate(90deg); }
+    .msg-refs-body { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .msg-ref-item { display: flex; align-items: flex-start; gap: 7px; width: 100%; text-align: left;
+      padding: 6px 9px; border-radius: 10px; background: rgba(139,121,212,.06);
+      cursor: pointer; transition: background .15s ease; }
+    .msg-ref-item:hover { background: rgba(139,121,212,.13); }
+    .msg-ref-text { display: flex; flex-direction: column; gap: 1px; min-width: 0;
+      font-size: 11.5px; color: #4a4a5e; line-height: 1.4; }
+    .msg-ref-text b { font-weight: 600; color: #3a3550; }
+    .msg-ref-meta { color: #9890b0; font-size: 11px; }
 
     /* notsure 标记 */
     .notsure {
@@ -743,6 +759,41 @@
 
     // sources 结构：[{doc_id, doc_name, nodes:[{handle, section, lines, snippet}]}]
     // 同一文档只渲染一张卡（诉求1：去重在后端按 doc_id 分组、node 按 handle 去重）
+    // 从全量检索来源中挑出正文实际引用的 node（与正文上标对应）；正文零引用/无匹配则回退全量
+    function pickCitedSources(sources, usedHandles){
+      sources = sources || [];
+      if(usedHandles && usedHandles.size){
+        const picked = sources
+          .map(doc => ({ ...doc, nodes: (doc.nodes || []).filter(nd => usedHandles.has(nd.handle)) }))
+          .filter(doc => doc.nodes.length);
+        if(picked.length) return picked;
+      }
+      return sources;
+    }
+
+    // 在 AI 回答气泡下方渲染引用面包屑：本条回答引用了哪些来源，点击联动右侧。复用 citeIndex 编号
+    function renderMsgRefs(shell, sources){
+      const items = [];
+      (sources || []).forEach(doc => (doc.nodes || []).forEach(nd => {
+        const num = citeIndex[nd.handle] || '';
+        const meta = [nd.section, nd.lines ? '行' + nd.lines : ''].filter(Boolean).join(' · ');
+        items.push('<button class="msg-ref-item" data-handle="' + escapeHtml(nd.handle || '') + '">'
+          + '<span class="cite-badge" data-ref="' + num + '">' + num + '</span>'
+          + '<span class="msg-ref-text"><b>' + escapeHtml(doc.doc_name || '') + '</b>'
+          + (meta ? '<span class="msg-ref-meta">' + escapeHtml(meta) + '</span>' : '')
+          + '</span></button>');
+      }));
+      let box = shell.wrap.querySelector('.msg-refs');
+      if(!items.length){ if(box) box.remove(); return; }
+      if(!box){
+        box = document.createElement('details');  // 默认折叠：不强制占空间，但入口常在
+        box.className = 'msg-refs';
+        shell.body.insertAdjacentElement('afterend', box);
+      }
+      box.innerHTML = '<summary class="msg-refs-sum">来源 · ' + items.length + ' 处</summary>'
+        + '<div class="msg-refs-body">' + items.join('') + '</div>';
+    }
+
     function renderRefs(sources){
       sources = sources || [];
       citeIndex = {};
@@ -897,8 +948,15 @@
             } else if(ev.type === 'error'){
               ai.body.innerHTML = '<span class="text-red-500">⚠ ' + escapeHtml(ev.text||'服务出错') + '</span>';
             } else if(ev.type === 'answer'){
-              renderRefs(ev.sources);  // 先建 citeIndex，再渲染正文，正文上标据此编号
-              ai.body.innerHTML = renderMarkdown(ev.text || streamText || '（无内容）');
+              const answerText = ev.text || streamText || '（无内容）';
+              // 收集正文实际引用的 node（[[cite:handle]]）；右侧与本条面包屑只显示这些，与正文严格对应
+              const used = new Set();
+              const reCite = /\[\[cite:([^\]]+)\]\]/g; let mc;
+              while((mc = reCite.exec(answerText)) !== null) used.add(mc[1]);
+              const refs = pickCitedSources(ev.sources, used);
+              renderRefs(refs);                        // 右侧面板（建 citeIndex）
+              ai.body.innerHTML = renderMarkdown(answerText);  // 正文上标据 citeIndex
+              renderMsgRefs(ai, refs);                 // 本条回答下方的引用面包屑
               if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已完成';
               conversationHistory.push({role:'user', content:q});
               conversationHistory.push({role:'assistant', content:ev.text||''});
@@ -920,6 +978,8 @@
     document.addEventListener('click', e => {
       const anchor = e.target.closest('.cite-anchor');
       if(anchor){ focusCite(anchor.dataset.handle); return; }
+      const item = e.target.closest('.msg-ref-item');
+      if(item){ focusCite(item.dataset.handle); return; }
       const node = e.target.closest('#ref-list .ref-node');
       if(node){ focusCite(node.dataset.handle); }
     });
