@@ -1,0 +1,11 @@
+# v0 骨架阶段：留壳供 v1 启用。SQLite 单机不需要外部服务。
+# v1+ 加入 Postgres / Redis 时在此扩展。
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./torch_kb.db:/app/torch_kb.db

@@ -1,0 +1,77 @@
+from app.core.docparse.postprocess import fix_markdown_table_header, repair_unclosed_html_tables
+
+# ── Task 1: repair_unclosed_html_tables ────────────────────────────────────────
+
+def test_repair_adds_missing_table_close():
+    text = "<!-- page: 1 -->\n<table>\n<tbody>\n<tr><td>A</td></tr>\n<!-- page: 2 -->\n正文"
+    out = repair_unclosed_html_tables(text)
+    assert "</table>" in out
+    # The closing tag must appear before the next page marker
+    table_close_pos = out.index("</table>")
+    page2_pos = out.index("<!-- page: 2 -->")
+    assert table_close_pos < page2_pos
+
+
+def test_repair_adds_tbody_and_table_close():
+    text = "<!-- page: 1 -->\n<table>\n<tbody>\n<tr><td>A</td></tr>\n<!-- page: 2 -->\n正文"
+    out = repair_unclosed_html_tables(text)
+    assert "</tbody>" in out
+    assert "</table>" in out
+
+
+def test_repair_leaves_closed_table_unchanged():
+    text = "<!-- page: 1 -->\n<table>\n<tbody>\n<tr><td>A</td></tr>\n</tbody>\n</table>\n正文"
+    out = repair_unclosed_html_tables(text)
+    assert out.count("</table>") == 1
+
+
+def test_repair_handles_no_tables():
+    text = "<!-- page: 1 -->\n正文内容\n<!-- page: 2 -->\n更多内容"
+    out = repair_unclosed_html_tables(text)
+    assert out == text
+
+
+def test_repair_handles_text_without_page_markers():
+    text = "<table>\n<tbody>\n<tr><td>A</td></tr>\n"
+    out = repair_unclosed_html_tables(text)
+    assert "</table>" in out
+
+
+# ── Task 2: fix_markdown_table_header ─────────────────────────────────────────
+
+def test_fix_header_prepends_empty_row_when_sep_is_first():
+    text = "| :--- | :--- | :--- |\n| A | B | C |\n| D | E | F |"
+    out = fix_markdown_table_header(text)
+    lines = out.split('\n')
+    # First line should now be an empty header row
+    assert lines[0].startswith('|')
+    assert not lines[0].strip().replace('|', '').replace(' ', '').startswith('-')
+    # Second line should be the original separator
+    assert ':---' in lines[1]
+
+
+def test_fix_header_3_columns():
+    text = "| :--- | :--- | :--- |\n| A | B | C |"
+    out = fix_markdown_table_header(text)
+    lines = out.split('\n')
+    assert lines[0].count('|') == 4  # 3 columns → 4 pipes
+
+
+def test_fix_header_does_not_touch_normal_table():
+    text = "| 标题A | 标题B |\n| :--- | :--- |\n| A | B |"
+    out = fix_markdown_table_header(text)
+    assert out == text
+
+
+def test_fix_header_does_not_touch_code_blocks():
+    text = "```\n| :--- | :--- |\n```"
+    out = fix_markdown_table_header(text)
+    assert out == text
+
+
+def test_fix_header_handles_no_trailing_pipe():
+    text = "| :--- | :--- |\n| A | B |"
+    out = fix_markdown_table_header(text)
+    lines = out.split('\n')
+    assert lines[0].startswith('|')
+    assert ':---' in lines[1]

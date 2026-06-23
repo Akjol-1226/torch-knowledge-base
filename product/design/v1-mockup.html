@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>火炬电子知识库 v1 · Mockup</title>
+
+  <!-- Geist + Geist Mono + Noto Sans SC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Geist', '"Noto Sans SC"', 'system-ui', 'sans-serif'],
+            mono: ['"Geist Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            canvas: '#F7F8F8',
+            ink:  { DEFAULT: '#1A1B1E', muted: '#5C6066', subtle: '#8A8F98', faint: '#A8ACB3' },
+            hair: { DEFAULT: '#E6E7E9', strong: '#D5D7DB' },
+            accent: { DEFAULT: '#5E6AD2', soft: 'rgba(94,106,210,0.12)' },
+            st: { queue: '#94A3B8', proc: '#3B82F6', review: '#F59E0B', done: '#22C55E', fail: '#EF4444' },
+          },
+          borderRadius: { container: '12px', card: '8px', control: '8px' },
+        },
+      },
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    :root {
+      --canvas: #F7F8F8;
+      --surface-2: #F1F2F4;
+      --ink: #1A1B1E;
+      --ink-muted: #5C6066;
+      --ink-subtle: #8A8F98;
+      --ink-faint: #A8ACB3;
+      --hair: #E6E7E9;
+      --hair-strong: #D5D7DB;
+      --accent: #5E6AD2;
+      --accent-soft: rgba(94,106,210,0.12);
+      --primary: #1A1B1E;
+      --primary-hover: #2C2E33;
+      --st-queue: #94A3B8;
+      --st-proc: #3B82F6;
+      --st-review: #F59E0B;
+      --st-done: #22C55E;
+      --st-fail: #EF4444;
+    }
+
+    body {
+      background: var(--canvas);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 实底面板 —— 取代全局玻璃；层级靠 surface + hairline */
+    .panel {
+      background: #FFFFFF;
+      border: 1px solid var(--hair);
+      box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+    }
+    .panel-sub {
+      background: #FFFFFF;
+      border: 1px solid var(--hair);
+    }
+
+    /* 精炼磨砂 —— 只给真正浮起来的弹窗用 */
+    .glass {
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.9);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 24px 60px rgba(16,24,40,0.18);
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .glass { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+
+    @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-enter { animation: fade-in .28s ease-out forwards; }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); background-clip: padding-box; }
+
+    /* 顶栏导航 */
+    .topbar-link { @apply px-3.5 py-1.5 rounded-control text-sm font-medium text-ink-muted cursor-pointer transition; }
+    .topbar-link:hover { @apply text-ink; background: var(--surface-2); }
+    .topbar-link.active { @apply text-ink; background: var(--surface-2); }
+
+    /* 二级侧栏 */
+    .side-link { @apply flex items-center gap-2.5 px-3 py-2 rounded-control text-sm text-ink-muted cursor-pointer transition; }
+    .side-link:hover { @apply text-ink; background: var(--surface-2); }
+    .side-link.active { @apply text-ink font-medium; background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+
+    /* 引用徽标 */
+    .cite {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px;
+      font-size: 11px; font-weight: 600; vertical-align: baseline; margin: 0 1px;
+      font-family: '"Geist Mono"', monospace;
+      background: var(--surface-2); border: 1px solid var(--hair); color: var(--ink-muted);
+      cursor: pointer; transition: all .15s ease;
+    }
+    .cite:hover { border-color: var(--accent); color: var(--accent); }
+    .cite.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* notsure 标记 —— 复用 review 琥珀（语义） */
+    .notsure {
+      background: linear-gradient(180deg, transparent 60%, rgba(245,158,11,0.26) 60%);
+      padding: 0 2px; border-radius: 2px; border-bottom: 2px solid var(--st-review);
+    }
+
+    /* 状态点（扁平，无发光） */
+    .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .dot-queue { background: var(--st-queue); }
+    .dot-proc { background: var(--st-proc); }
+    .dot-review { background: var(--st-review); }
+    .dot-done { background: var(--st-done); }
+    .dot-fail { background: var(--st-fail); }
+
+    /* 按钮 */
+    .btn-primary { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-control text-sm font-medium text-white transition; background: var(--primary); }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:active { transform: translateY(0.5px); }
+    .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-control text-sm font-medium text-ink transition; background: #fff; border: 1px solid var(--hair); }
+    .btn-secondary:hover { background: var(--surface-2); border-color: var(--hair-strong); }
+    .btn-secondary:active { transform: translateY(0.5px); }
+    .btn-danger { @apply btn-secondary; color: #DC2626; }
+    .btn-danger:hover { color: #B91C1C; background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.25); }
+
+    /* 输入 */
+    .field { @apply w-full bg-white rounded-control px-3 py-2 text-sm text-ink outline-none transition; border: 1px solid var(--hair); }
+    .field::placeholder { color: var(--ink-faint); }
+    .field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    textarea.field { resize: none; line-height: 1.6; }
+
+    /* 表格 */
+    .th { @apply text-xs text-ink-subtle font-medium py-2.5 px-4 text-left; }
+    .td { @apply py-2.5 px-4 text-sm text-ink; }
+    .td-muted { @apply text-sm text-ink-muted; }
+    tbody tr.row { border-top: 1px solid var(--hair); transition: background .12s ease; }
+    tbody tr.row:hover { background: #FAFAFB; }
+
+    /* 中性标签 */
+    .chip { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-xs font-medium text-ink-muted; background: var(--surface-2); border: 1px solid var(--hair); }
+
+    /* 状态徽章（唯一允许的彩色） */
+    .badge { @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium; }
+    .badge-queue  { color: #475569; background: rgba(148,163,184,0.16); }
+    .badge-proc   { color: #2563EB; background: rgba(59,130,246,0.12); }
+    .badge-review { color: #B45309; background: rgba(245,158,11,0.16); }
+    .badge-done   { color: #15803D; background: rgba(34,197,94,0.14); }
+    .badge-fail   { color: #DC2626; background: rgba(239,68,68,0.12); }
+
+    /* 队列状态筛选 */
+    .qfilter { @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-ink-muted cursor-pointer transition; background: #fff; border: 1px solid var(--hair); }
+    .qfilter:hover { background: var(--surface-2); }
+    .qfilter.active { color: #fff; background: var(--ink); border-color: var(--ink); }
+
+    /* 引用卡片 */
+    .ref-card { @apply bg-white rounded-card p-3.5 cursor-pointer transition; border: 1px solid var(--hair); }
+    .ref-card:hover { border-color: var(--hair-strong); }
+    .ref-card.ref-active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .ref-tab { @apply px-2.5 py-1 text-xs font-medium rounded-[6px] text-ink-subtle cursor-pointer transition; }
+    .ref-tab.active { @apply text-ink; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,0.08); }
+
+    /* 会话条目 */
+    .conv-item { @apply rounded-card p-3 cursor-pointer transition; border: 1px solid transparent; }
+    .conv-item:hover { background: var(--surface-2); }
+    .conv-item.active { background: #fff; border-color: var(--hair); box-shadow: inset 2px 0 0 var(--accent), 0 1px 2px rgba(16,24,40,0.04); }
+
+    /* 头像 */
+    .avatar { @apply flex items-center justify-center font-medium; background: #1A1B1E; color: #fff; }
+    .tile { @apply flex items-center justify-center font-semibold; background: var(--surface-2); color: var(--ink-muted); border: 1px solid var(--hair); }
+
+    .view-pane.hidden { display: none !important; }
+
+    .mockup-bar { background: #fff; border: 1px solid var(--hair); box-shadow: 0 8px 28px rgba(16,24,40,0.12); }
+  </style>
+</head>
+
+<body class="h-[100dvh] m-0 p-0 overflow-hidden font-sans text-ink">
+
+  <!-- 极淡颗粒，打破纯平 -->
+  <div class="fixed inset-0 -z-10 pointer-events-none opacity-[0.025]"
+       style="background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22120%22><filter id=%22n%22><feTurbulence type=%22fractalNoise%22 baseFrequency=%220.9%22 numOctaves=%222%22/></filter><rect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23n)%22/></svg>');"></div>
+
+  <!-- Mockup 切换 -->
+  <div class="fixed bottom-4 right-4 z-50 mockup-bar rounded-container p-3 flex items-center gap-3">
+    <div>
+      <p class="text-[11px] text-ink-subtle mb-1 font-medium">视图切换</p>
+      <select id="page-switcher" class="bg-white text-xs rounded-control px-3 py-2 outline-none cursor-pointer min-w-[200px]" style="border:1px solid var(--hair)">
+        <option value="chat">1 · 聊天主页面</option>
+        <option value="kb-upload">2 · 知识库 / 上传</option>
+        <option value="kb-queue">3 · 知识库 / 任务队列</option>
+        <option value="kb-review-list">4 · 知识库 / 待 review 列表</option>
+        <option value="kb-review-detail">5 · 知识库 / Review 详情</option>
+        <option value="kb-list">6 · 知识库 / 知识库列表</option>
+        <option value="sys-users">7 · 系统 / 用户管理</option>
+        <option value="sys-roles">8 · 系统 / 角色管理</option>
+        <option value="sys-role-modal">9 · 系统 / 新建角色弹窗</option>
+      </select>
+    </div>
+    <div class="text-[11px] text-ink-faint max-w-[170px] leading-relaxed border-l border-hair pl-3">
+      仅用于设计与开发对齐，非真实交互流程。
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <main class="flex flex-col h-[100dvh] w-full p-3 lg:p-5 gap-3">
+
+    <!-- ============ TopBar ============ -->
+    <header class="panel rounded-container px-5 py-3 flex justify-between items-center">
+      <div class="flex items-center gap-9">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-[7px] flex items-center justify-center" style="background:#1A1B1E">
+            <svg class="w-4.5 h-4.5 text-white" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3c-1 3-4 4.5-4 8a4 4 0 008 0c0-1.7-1-3-1.5-4 .2 2-1 3-1.5 3 .3-2-.5-5-1-7z"/></svg>
+          </div>
+          <div class="leading-tight">
+            <div class="text-[11px] font-medium text-ink-subtle">Torch Electronics</div>
+            <div class="text-[15px] font-semibold text-ink -mt-0.5">研发知识库</div>
+          </div>
+        </div>
+        <nav class="flex items-center gap-1" id="topbar-nav">
+          <a data-nav="chat" class="topbar-link active">聊天</a>
+          <a data-nav="kb"   class="topbar-link">知识库管理</a>
+          <a data-nav="sys"  class="topbar-link">系统</a>
+        </nav>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <div class="hidden md:flex items-center gap-2 rounded-full pl-2.5 pr-3 py-1.5" style="border:1px solid var(--hair)">
+          <span class="dot dot-done"></span>
+          <span class="text-xs text-ink-muted font-medium">在线</span>
+        </div>
+        <div class="flex items-center gap-2.5 rounded-full pl-1.5 pr-3.5 py-1.5" style="border:1px solid var(--hair)">
+          <div class="avatar w-7 h-7 rounded-full text-xs">张</div>
+          <span class="text-sm text-ink font-medium">张工 · 管理员</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ 工作区 ============ -->
+    <div id="workspace" class="flex-1 flex gap-3 overflow-hidden">
+
+      <!-- ============================================================== -->
+      <!-- 视图 1 · 聊天主页面 -->
+      <!-- ============================================================== -->
+      <section data-view="chat" class="view-pane flex-1 flex gap-3 animate-enter">
+
+        <!-- 会话列表 -->
+        <aside class="w-72 panel rounded-container p-4 flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-semibold text-ink">我的会话</h3>
+            <button class="btn-primary !p-0 w-8 h-8 !rounded-control" title="新建会话">
+              <svg class="w-4.5 h-4.5" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+            </button>
+          </div>
+
+          <div class="relative mb-3">
+            <input class="field pl-9" placeholder="搜索会话..." />
+            <svg class="absolute left-3 top-2.5 w-4 h-4 text-ink-faint" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4-4"/></svg>
+          </div>
+
+          <p class="text-xs text-ink-subtle font-medium mb-1.5 px-1">今天</p>
+          <div class="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1 -mr-1">
+            <div class="conv-item active">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-ink truncate">膜厚控制要求</p>
+                <span class="text-[11px] text-ink-faint font-mono">14:32</span>
+              </div>
+              <p class="text-xs text-ink-muted truncate mt-0.5">膜厚应控制在 50±5μm...</p>
+            </div>
+            <div class="conv-item">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-ink truncate">烧结工艺温度曲线</p>
+                <span class="text-[11px] text-ink-faint font-mono">11:08</span>
+              </div>
+              <p class="text-xs text-ink-muted truncate mt-0.5">烧结温度分为三段，预烧...</p>
+            </div>
+            <div class="conv-item">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-ink truncate">MLCC 击穿电压检验</p>
+                <span class="text-[11px] text-ink-faint font-mono">09:41</span>
+              </div>
+              <p class="text-xs text-ink-muted truncate mt-0.5">击穿电压测试需满足...</p>
+            </div>
+
+            <p class="text-xs text-ink-subtle font-medium mb-1.5 px-1 pt-3">本周</p>
+            <div class="conv-item">
+              <p class="text-sm font-medium text-ink truncate">铜电极工艺问题排查</p>
+              <p class="text-xs text-ink-muted truncate mt-0.5">关于 1206 封装下铜电极脱落...</p>
+            </div>
+            <div class="conv-item">
+              <p class="text-sm font-medium text-ink truncate">老化测试 SOP</p>
+              <p class="text-xs text-ink-muted truncate mt-0.5">老化时间是否能从 48h 缩...</p>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 对话主区 -->
+        <section class="flex-1 panel rounded-container flex flex-col overflow-hidden">
+          <div class="px-6 py-3.5 flex items-center justify-between" style="border-bottom:1px solid var(--hair)">
+            <div>
+              <h2 class="text-base font-semibold text-ink">膜厚控制要求</h2>
+              <p class="text-xs text-ink-muted mt-0.5 flex items-center gap-1.5">检索范围 <span class="chip">瓷片电容库</span> <span class="chip">全员库</span></p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="btn-secondary !py-1.5">收藏</button>
+              <button class="btn-secondary !py-1.5">重命名</button>
+              <button class="btn-danger !py-1.5">删除</button>
+            </div>
+          </div>
+
+          <!-- 消息流 -->
+          <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
+
+            <!-- 用户提问 -->
+            <div class="flex justify-end gap-3">
+              <div class="max-w-[70%]">
+                <div class="rounded-card rounded-tr-[3px] px-4 py-2.5 text-sm text-ink" style="background:var(--surface-2);border:1px solid var(--hair)">
+                  膜厚控制要求是多少？高温环境是否需要额外考虑？
+                </div>
+                <div class="text-[11px] text-ink-faint font-mono mt-1 text-right">14:32:08</div>
+              </div>
+              <div class="avatar w-8 h-8 rounded-full text-sm flex-shrink-0">张</div>
+            </div>
+
+            <!-- AI 回答 -->
+            <div class="flex gap-3">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style="background:var(--accent-soft);border:1px solid var(--hair)">
+                <svg class="w-4 h-4" style="color:var(--accent)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3c-1 3-4 4.5-4 8a4 4 0 008 0c0-1.7-1-3-1.5-4 .2 2-1 3-1.5 3 .3-2-.5-5-1-7z"/></svg>
+              </div>
+              <div class="max-w-[75%]">
+                <!-- tool call 折叠 -->
+                <details id="tool-call" class="mb-2.5">
+                  <summary class="rounded-card px-3 py-2 inline-flex items-center gap-2 text-xs text-ink-muted cursor-pointer transition list-none" style="background:var(--surface-2);border:1px solid var(--hair)">
+                    <svg class="w-3.5 h-3.5 tool-arrow transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 5l7 7-7 7"/></svg>
+                    <span>已检索 <strong class="text-ink font-semibold">3</strong> 份文档 · PageIndex 双向</span>
+                    <span class="text-ink-faint">·</span>
+                    <span class="font-mono">耗时 1.4s</span>
+                  </summary>
+                  <div class="rounded-card p-3.5 mt-2 text-[11px] font-mono text-ink-muted leading-relaxed" style="background:var(--surface-2);border:1px solid var(--hair)">
+                    <p class="text-ink-faint mb-2">// PageIndex.search · 自上而下</p>
+                    <p>tool_call: <span style="color:var(--accent)">page_index_search</span>({</p>
+                    <p class="pl-4">query: "膜厚控制要求",</p>
+                    <p class="pl-4">mode: "top_down",</p>
+                    <p class="pl-4">kbs: ["瓷片库", "全员库"]</p>
+                    <p>})</p>
+                    <p class="text-ink-faint mt-2 mb-1">// response</p>
+                    <p>→ matched 3 nodes: [5.2, 3.1, 2.4]</p>
+                  </div>
+                </details>
+
+                <div class="rounded-card rounded-tl-[3px] px-4 py-3.5 text-sm text-ink leading-relaxed" style="background:#fff;border:1px solid var(--hair)">
+                  根据火炬电子内部工艺文件：
+                  <ol class="list-decimal ml-4 my-2 space-y-1.5">
+                    <li>瓷片电容介质膜厚应控制在 <strong class="font-semibold">50 ± 5 μm</strong> 范围内 <span class="cite" data-ref="1">1</span><span class="cite" data-ref="2">2</span>；</li>
+                    <li>高温烧结环境下需额外考虑 <strong class="font-semibold">4%~6% 的收缩率</strong>，建议预留 3 μm 工艺余量 <span class="cite" data-ref="3">3</span>；</li>
+                    <li>若使用银钯电极，建议偏向上限以保证击穿电压裕度 <span class="cite" data-ref="2">2</span>。</li>
+                  </ol>
+                  <p class="text-xs text-ink-muted mt-3">提示：以上结论仅基于知识库现有文档，工艺参数最终请以工艺部门确认为准。</p>
+                </div>
+
+                <div class="flex items-center gap-3 mt-2.5 text-xs text-ink-faint">
+                  <button class="hover:text-ink-muted flex items-center gap-1 transition"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"/></svg>有用</button>
+                  <button class="hover:text-ink-muted flex items-center gap-1 transition"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06L17 4m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2"/></svg>需改进</button>
+                  <span class="text-hair-strong">|</span>
+                  <button class="hover:text-ink-muted transition">复制</button>
+                  <button class="hover:text-ink-muted transition">重新生成</button>
+                </div>
+                <div class="text-[11px] text-ink-faint font-mono mt-1.5">14:32:12</div>
+              </div>
+            </div>
+
+            <!-- 第二轮提问 -->
+            <div class="flex justify-end gap-3">
+              <div class="max-w-[70%]">
+                <div class="rounded-card rounded-tr-[3px] px-4 py-2.5 text-sm text-ink" style="background:var(--surface-2);border:1px solid var(--hair)">
+                  那银钯电极的具体烧结温度是？
+                </div>
+                <div class="text-[11px] text-ink-faint font-mono mt-1 text-right">14:34:22</div>
+              </div>
+              <div class="avatar w-8 h-8 rounded-full text-sm flex-shrink-0">张</div>
+            </div>
+          </div>
+
+          <!-- 输入区 -->
+          <div class="px-6 py-4" style="border-top:1px solid var(--hair)">
+            <div class="relative">
+              <textarea class="field !pl-11 !pr-24 !py-3.5 max-h-32" rows="1" placeholder="继续提问…"></textarea>
+              <button class="absolute left-2.5 top-2.5 p-2 text-ink-faint hover:text-ink rounded-control transition" title="附件">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.656-5.656l-6.586 6.586a6 6 0 008.486 8.486L20.5 13"/></svg>
+              </button>
+              <button class="btn-primary absolute right-2.5 top-2">发送</button>
+            </div>
+            <p class="text-[11px] text-center text-ink-faint mt-2.5">AI 仅根据知识库文档回答，超出范围会如实告知</p>
+          </div>
+        </section>
+
+        <!-- 引用面板 -->
+        <aside class="w-[340px] panel rounded-container flex flex-col overflow-hidden">
+          <div class="px-4 py-3.5 flex items-center justify-between" style="border-bottom:1px solid var(--hair)">
+            <h3 class="text-sm font-semibold text-ink">数据来源 · 3</h3>
+            <div class="flex gap-0.5 rounded-lg p-0.5" id="ref-tabs" style="background:var(--surface-2);border:1px solid var(--hair)">
+              <button class="ref-tab active" data-tab="md">MD</button>
+              <button class="ref-tab" data-tab="pdf">PDF</button>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto custom-scrollbar p-3.5 space-y-2.5">
+
+            <!-- 引用卡片 1 -->
+            <div class="ref-card ref-active" data-ref-card="1">
+              <div class="flex items-start justify-between mb-2">
+                <span class="cite active" data-ref="1">1</span>
+                <span class="chip">瓷片电容库</span>
+              </div>
+              <p class="text-sm font-medium text-ink mb-0.5">瓷片电容工艺规范 V3.pdf</p>
+              <p class="text-[11px] text-ink-faint mb-3">章节 5.2 膜厚控制 · 第 47 页</p>
+
+              <div class="ref-content ref-md rounded-card p-3" style="background:var(--surface-2);border:1px solid var(--hair)">
+                <p class="text-xs text-ink-muted leading-relaxed">
+                  "膜厚应控制在 <strong class="text-ink font-semibold">50±5μm</strong> 范围内，超出此范围将导致击穿电压不达标..."
+                </p>
+              </div>
+              <div class="ref-content ref-pdf rounded-card overflow-hidden hidden" style="background:#22252A">
+                <div class="bg-white m-3 rounded p-3 text-[10px] leading-tight text-slate-700 shadow-inner">
+                  <p class="text-ink-faint mb-1 font-mono">— 47 —</p>
+                  <p class="font-bold mb-1">5.2 膜厚控制</p>
+                  <p style="background:rgba(245,158,11,0.3)" class="inline px-0.5">膜厚应控制在 50±5μm 范围内</p>
+                </div>
+                <div class="px-3 pb-2 flex items-center justify-between text-[10px] text-slate-300">
+                  <span class="font-mono">第 47 / 226 页</span>
+                  <button class="hover:text-white transition">在新窗口打开 ↗</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 引用卡片 2 -->
+            <div class="ref-card" data-ref-card="2">
+              <div class="flex items-start justify-between mb-2">
+                <span class="cite" data-ref="2">2</span>
+                <span class="chip">全员库</span>
+              </div>
+              <p class="text-sm font-medium text-ink mb-0.5">检验标准 2024.pdf</p>
+              <p class="text-[11px] text-ink-faint mb-3">章节 3.1 介质层 · 第 12 页</p>
+
+              <div class="ref-content ref-md rounded-card p-3" style="background:var(--surface-2);border:1px solid var(--hair)">
+                <p class="text-xs text-ink-muted leading-relaxed">
+                  "...介质层标准膜厚 <strong class="text-ink font-semibold">50μm</strong>，公差 ±5μm，银钯电极建议..."
+                </p>
+              </div>
+              <div class="ref-content ref-pdf rounded-card overflow-hidden hidden" style="background:#22252A">
+                <div class="bg-white m-3 rounded p-3 text-[10px] leading-tight text-slate-700 shadow-inner">
+                  <p class="text-ink-faint mb-1 font-mono">— 12 —</p>
+                  <p class="font-bold mb-1">3.1 介质层</p>
+                  <p style="background:rgba(245,158,11,0.3)" class="inline px-0.5">介质层标准膜厚 50μm，公差 ±5μm</p>
+                </div>
+                <div class="px-3 pb-2 flex items-center justify-between text-[10px] text-slate-300">
+                  <span class="font-mono">第 12 / 132 页</span>
+                  <button class="hover:text-white transition">在新窗口打开 ↗</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 引用卡片 3 -->
+            <div class="ref-card" data-ref-card="3">
+              <div class="flex items-start justify-between mb-2">
+                <span class="cite" data-ref="3">3</span>
+                <span class="chip">瓷片电容库</span>
+              </div>
+              <p class="text-sm font-medium text-ink mb-0.5">膜厚控制规范.docx</p>
+              <p class="text-[11px] text-ink-faint mb-3">章节 2.4 高温工艺 · 段落 8</p>
+
+              <div class="ref-content ref-md rounded-card p-3" style="background:var(--surface-2);border:1px solid var(--hair)">
+                <p class="text-xs text-ink-muted leading-relaxed">
+                  "高温烧结时收缩率 <strong class="text-ink font-semibold">4%~6%</strong>，工艺设计需预留补偿..."
+                </p>
+              </div>
+              <div class="ref-content ref-pdf rounded-card overflow-hidden hidden" style="background:#22252A">
+                <div class="bg-white m-3 rounded p-3 text-[10px] leading-tight text-slate-700 shadow-inner">
+                  <p class="text-ink-faint mb-1 font-mono">膜厚控制规范.docx</p>
+                  <p class="font-bold mb-1">2.4 高温工艺</p>
+                  <p style="background:rgba(245,158,11,0.3)" class="inline px-0.5">高温烧结时收缩率 4%~6%</p>
+                </div>
+                <div class="px-3 pb-2 flex items-center justify-between text-[10px] text-slate-300">
+                  <span class="font-mono">段落 8</span>
+                  <button class="hover:text-white transition">在新窗口打开 ↗</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </aside>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 2 · 知识库 / 上传 -->
+      <!-- ============================================================== -->
+      <section data-view="kb-upload" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">知识库管理</p>
+          <nav class="space-y-0.5">
+            <a class="side-link active"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5 5 5M12 5v12"/></svg>上传</a>
+            <a class="side-link"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>任务队列<span class="ml-auto chip">5</span></a>
+            <a class="side-link"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>待 review<span class="ml-auto chip">3</span></a>
+            <a class="side-link"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H6a2 2 0 00-2 2z"/></svg>知识库</a>
+          </nav>
+          <div class="mt-auto pt-4" style="border-top:1px solid var(--hair)">
+            <p class="text-xs text-ink-subtle font-medium mb-2">当前并发</p>
+            <div class="rounded-card p-3 flex items-center justify-between" style="background:var(--surface-2);border:1px solid var(--hair)">
+              <span class="text-sm text-ink font-mono">3 / 5</span>
+              <button class="text-xs font-medium transition" style="color:var(--accent)">配置</button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-1.5">
+            <h1 class="text-xl font-semibold text-ink tracking-tight">上传文档</h1>
+            <p class="text-xs text-ink-faint">支持 PDF / Word / PPT · 单文件 ≤ 200 MB</p>
+          </div>
+          <p class="text-sm text-ink-muted mb-7">入库后将由 VLM 自动识别 + 管理员 review notsure 标记。</p>
+
+          <!-- 目标库 -->
+          <div class="mb-5">
+            <label class="text-sm text-ink-muted font-medium mb-1.5 block">目标知识库</label>
+            <div class="relative max-w-md">
+              <select class="field appearance-none pr-10 cursor-pointer">
+                <option>瓷片电容库</option>
+                <option>芯片库</option>
+                <option>检验标准库</option>
+                <option>全员库</option>
+              </select>
+              <svg class="absolute right-3.5 top-3 w-4 h-4 text-ink-faint pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 9l-7 7-7-7"/></svg>
+            </div>
+          </div>
+
+          <!-- 拖拽区 -->
+          <div class="rounded-container p-10 text-center mb-5 transition cursor-pointer" style="background:#FAFAFB;border:1.5px dashed var(--hair-strong)">
+            <div class="w-12 h-12 rounded-container mx-auto mb-3.5 flex items-center justify-center" style="background:var(--surface-2);border:1px solid var(--hair)">
+              <svg class="w-6 h-6 text-ink-muted" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            </div>
+            <p class="text-sm font-medium text-ink mb-1">拖拽文件到这里，或<span style="color:var(--accent)" class="underline underline-offset-4 ml-0.5">点击选择</span></p>
+            <p class="text-xs text-ink-faint">PDF / Word / PPT · 单文件最大 200 MB · 同批文件入同一知识库</p>
+          </div>
+
+          <!-- 已选列表 -->
+          <div class="mb-5">
+            <div class="flex items-center justify-between mb-2.5">
+              <p class="text-sm text-ink-muted font-medium">已选 3 个文件</p>
+              <button class="text-xs text-ink-faint hover:text-ink transition">清空</button>
+            </div>
+            <div class="space-y-2">
+              <div class="rounded-card px-3.5 py-2.5 flex items-center justify-between" style="background:#fff;border:1px solid var(--hair)">
+                <div class="flex items-center gap-3">
+                  <div class="tile w-8 h-8 rounded-[6px] text-[9px] tracking-wide">PDF</div>
+                  <div>
+                    <p class="text-sm text-ink font-medium">瓷片电容工艺 V3.pdf</p>
+                    <p class="text-[11px] text-ink-faint font-mono">12.4 MB · 226 页</p>
+                  </div>
+                </div>
+                <button class="text-ink-faint hover:text-st-fail transition" title="移除"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+              </div>
+              <div class="rounded-card px-3.5 py-2.5 flex items-center justify-between" style="background:#fff;border:1px solid var(--hair)">
+                <div class="flex items-center gap-3">
+                  <div class="tile w-8 h-8 rounded-[6px] text-[9px] tracking-wide">PDF</div>
+                  <div>
+                    <p class="text-sm text-ink font-medium">检验标准 2024.pdf</p>
+                    <p class="text-[11px] text-ink-faint font-mono">8.7 MB · 132 页</p>
+                  </div>
+                </div>
+                <button class="text-ink-faint hover:text-st-fail transition"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+              </div>
+              <div class="rounded-card px-3.5 py-2.5 flex items-center justify-between" style="background:#fff;border:1px solid var(--hair)">
+                <div class="flex items-center gap-3">
+                  <div class="tile w-8 h-8 rounded-[6px] text-[9px] tracking-wide">DOC</div>
+                  <div>
+                    <p class="text-sm text-ink font-medium">膜厚控制规范.docx</p>
+                    <p class="text-[11px] text-ink-faint font-mono">3.2 MB · 48 页</p>
+                  </div>
+                </div>
+                <button class="text-ink-faint hover:text-st-fail transition"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2.5 pt-5" style="border-top:1px solid var(--hair)">
+            <button class="btn-secondary">取消</button>
+            <button class="btn-primary">上传 3 个文件</button>
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 3 · 知识库 / 任务队列 -->
+      <!-- ============================================================== -->
+      <section data-view="kb-queue" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">知识库管理</p>
+          <nav class="space-y-0.5">
+            <a class="side-link">上传</a>
+            <a class="side-link active">任务队列<span class="ml-auto chip">5</span></a>
+            <a class="side-link">待 review<span class="ml-auto chip">3</span></a>
+            <a class="side-link">知识库</a>
+          </nav>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h1 class="text-xl font-semibold text-ink tracking-tight">任务队列</h1>
+              <p class="text-sm text-ink-muted mt-0.5">异步处理 · 实时刷新</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="rounded-full px-3.5 py-1.5 flex items-center gap-2" style="border:1px solid var(--hair)">
+                <span class="text-xs text-ink-muted font-medium">并发数</span>
+                <span class="text-sm font-semibold text-ink font-mono">3</span>
+                <button class="text-xs font-medium ml-1" style="color:var(--accent)">改</button>
+              </div>
+              <button class="btn-secondary !py-1.5">刷新</button>
+            </div>
+          </div>
+
+          <!-- 状态筛选 -->
+          <div class="flex items-center gap-2 mb-5 flex-wrap">
+            <button class="qfilter active">全部 · 12</button>
+            <button class="qfilter"><span class="dot dot-queue"></span>排队中 · 3</button>
+            <button class="qfilter"><span class="dot dot-proc"></span>处理中 · 2</button>
+            <button class="qfilter"><span class="dot dot-review"></span>待 review · 3</button>
+            <button class="qfilter"><span class="dot dot-done"></span>已入库 · 3</button>
+            <button class="qfilter"><span class="dot dot-fail"></span>失败 · 1</button>
+          </div>
+
+          <!-- 表格 -->
+          <div class="rounded-container overflow-hidden" style="border:1px solid var(--hair)">
+            <table class="w-full">
+              <thead style="background:var(--surface-2)">
+                <tr>
+                  <th class="th">文件</th>
+                  <th class="th">目标库</th>
+                  <th class="th">状态</th>
+                  <th class="th">进度</th>
+                  <th class="th">提交时间</th>
+                  <th class="th text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="tile w-7 h-7 rounded-[6px] text-[9px]">PDF</div>
+                      <span class="font-medium">瓷片工艺 V3.pdf</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted">瓷片库</td>
+                  <td class="td"><span class="badge badge-proc"><span class="dot dot-proc"></span>处理中</span></td>
+                  <td class="td">
+                    <div class="flex items-center gap-2 max-w-[180px]">
+                      <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:var(--surface-2)"><div class="h-full rounded-full" style="width:43%;background:var(--st-proc)"></div></div>
+                      <span class="text-[11px] text-ink-muted font-mono">43%</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted font-mono text-[13px]">2026-05-26 14:02</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3">取消</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="tile w-7 h-7 rounded-[6px] text-[9px]">PDF</div>
+                      <span class="font-medium">检验标准 2024.pdf</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted">检验库</td>
+                  <td class="td"><span class="badge badge-queue"><span class="dot dot-queue"></span>排队中</span></td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted font-mono text-[13px]">2026-05-26 14:05</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3">取消</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="tile w-7 h-7 rounded-[6px] text-[9px]">DOC</div>
+                      <span class="font-medium">膜厚控制规范.docx</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted">瓷片库</td>
+                  <td class="td"><span class="badge badge-review"><span class="dot dot-review"></span>待 review · 28 处</span></td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted font-mono text-[13px]">2026-05-26 13:20</td>
+                  <td class="td text-right">
+                    <button class="btn-primary !py-1 !px-3" data-jump="kb-review-detail">去 review</button>
+                  </td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="tile w-7 h-7 rounded-[6px] text-[9px]">PDF</div>
+                      <span class="font-medium">XXX 工艺.pdf</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted">瓷片库</td>
+                  <td class="td"><span class="badge badge-done"><span class="dot dot-done"></span>已入库</span></td>
+                  <td class="td"><span class="font-mono text-[11px]" style="color:#15803D">100%</span></td>
+                  <td class="td td-muted font-mono text-[13px]">2026-05-26 09:14</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3">查看</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="tile w-7 h-7 rounded-[6px] text-[9px]">PDF</div>
+                      <span class="font-medium">YYY 工艺.pdf</span>
+                    </div>
+                  </td>
+                  <td class="td td-muted">瓷片库</td>
+                  <td class="td"><span class="badge badge-fail"><span class="dot dot-fail"></span>失败 · 重试 3/3</span></td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted font-mono text-[13px]">2026-05-26 08:40</td>
+                  <td class="td text-right">
+                    <button class="btn-secondary !py-1 !px-3 mr-1">查看错误</button>
+                    <button class="btn-secondary !py-1 !px-3">重试</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="text-xs text-ink-faint mt-4 text-center">显示 5 / 12 · 每页 10 行 · <button class="font-medium" style="color:var(--accent)">下一页 →</button></p>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 4 · 知识库 / 待 review 列表 -->
+      <!-- ============================================================== -->
+      <section data-view="kb-review-list" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">知识库管理</p>
+          <nav class="space-y-0.5">
+            <a class="side-link">上传</a>
+            <a class="side-link">任务队列<span class="ml-auto chip">5</span></a>
+            <a class="side-link active">待 review<span class="ml-auto chip">3</span></a>
+            <a class="side-link">知识库</a>
+          </nav>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h1 class="text-xl font-semibold text-ink tracking-tight">待 review</h1>
+              <p class="text-sm text-ink-muted mt-0.5">共 <strong class="font-semibold text-ink">3</strong> 份文档待人工确认 VLM 不确定项</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="relative">
+                <select class="field appearance-none !py-2 !pr-9 cursor-pointer text-[13px]">
+                  <option>全部知识库</option><option>瓷片电容库</option><option>检验标准库</option>
+                </select>
+                <svg class="absolute right-3 top-2.5 w-4 h-4 text-ink-faint pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 9l-7 7-7-7"/></svg>
+              </div>
+              <div class="relative">
+                <select class="field appearance-none !py-2 !pr-9 cursor-pointer text-[13px]">
+                  <option>最新优先</option><option>notsure 多优先</option>
+                </select>
+                <svg class="absolute right-3 top-2.5 w-4 h-4 text-ink-faint pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 9l-7 7-7-7"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2.5">
+            <div class="rounded-container p-4 flex items-center justify-between transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-center gap-3.5">
+                <div class="flex flex-col items-center justify-center w-12 h-12 rounded-card" style="background:rgba(245,158,11,0.12)">
+                  <span class="text-base font-semibold font-mono" style="color:#B45309">32</span>
+                </div>
+                <div>
+                  <p class="text-[15px] font-semibold text-ink">瓷片电容工艺 V3.pdf</p>
+                  <div class="flex items-center gap-2 mt-1 text-xs">
+                    <span class="chip">瓷片库</span>
+                    <span class="text-ink-faint font-mono">2026-05-26 14:32</span>
+                    <span class="text-hair-strong">·</span>
+                    <span class="font-medium" style="color:#B45309">32 处待确认</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-primary" data-jump="kb-review-detail">开始 review</button>
+            </div>
+
+            <div class="rounded-container p-4 flex items-center justify-between transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-center gap-3.5">
+                <div class="flex flex-col items-center justify-center w-12 h-12 rounded-card" style="background:rgba(245,158,11,0.12)">
+                  <span class="text-base font-semibold font-mono" style="color:#B45309">15</span>
+                </div>
+                <div>
+                  <p class="text-[15px] font-semibold text-ink">检验标准 2024.pdf</p>
+                  <div class="flex items-center gap-2 mt-1 text-xs">
+                    <span class="chip">检验库</span>
+                    <span class="text-ink-faint font-mono">2026-05-26 13:20</span>
+                    <span class="text-hair-strong">·</span>
+                    <span class="font-medium" style="color:#B45309">15 处待确认</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-primary" data-jump="kb-review-detail">开始 review</button>
+            </div>
+
+            <div class="rounded-container p-4 flex items-center justify-between transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-center gap-3.5">
+                <div class="flex flex-col items-center justify-center w-12 h-12 rounded-card" style="background:rgba(245,158,11,0.12)">
+                  <span class="text-base font-semibold font-mono" style="color:#B45309">8</span>
+                </div>
+                <div>
+                  <p class="text-[15px] font-semibold text-ink">膜厚控制规范.docx</p>
+                  <div class="flex items-center gap-2 mt-1 text-xs">
+                    <span class="chip">瓷片库</span>
+                    <span class="text-ink-faint font-mono">2026-05-26 11:08</span>
+                    <span class="text-hair-strong">·</span>
+                    <span class="font-medium" style="color:#B45309">8 处待确认</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-primary" data-jump="kb-review-detail">开始 review</button>
+            </div>
+          </div>
+
+          <div class="mt-7 rounded-card p-3.5 flex items-start gap-3 text-xs text-ink-muted" style="background:var(--surface-2);border:1px solid var(--hair)">
+            <svg class="w-4 h-4 mt-0.5 flex-shrink-0" style="color:var(--accent)" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <p>VLM 在原文不清楚的段落自动用 <code class="px-1.5 py-0.5 rounded font-mono" style="background:rgba(245,158,11,0.16);color:#B45309">&lt;notsure&gt;</code> 标记。Review 时管理员可"跳过 / 标记正确 / 修改保存"。改动会写入留痕，受影响章节 summary 异步重生成。</p>
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 5 · 知识库 / Review 详情 -->
+      <!-- ============================================================== -->
+      <section data-view="kb-review-detail" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <section class="flex-1 panel rounded-container flex flex-col overflow-hidden">
+          <div class="px-6 py-3.5 flex items-center justify-between" style="border-bottom:1px solid var(--hair)">
+            <div class="flex items-center gap-3.5">
+              <button class="w-8 h-8 rounded-control flex items-center justify-center text-ink-muted hover:text-ink transition" style="border:1px solid var(--hair)" title="返回"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15 19l-7-7 7-7"/></svg></button>
+              <div>
+                <h2 class="text-base font-semibold text-ink">瓷片电容工艺 V3.pdf</h2>
+                <p class="text-xs text-ink-muted mt-0.5 flex items-center gap-1.5"><span class="chip">瓷片库</span> 第 47 页 · 段落 3</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3.5">
+              <div class="text-right">
+                <p class="text-[11px] text-ink-subtle font-medium">进度</p>
+                <p class="text-sm font-semibold text-ink mt-0.5 font-mono">5 / 32</p>
+              </div>
+              <div class="w-40 h-1.5 rounded-full overflow-hidden" style="background:var(--surface-2)"><div class="h-full rounded-full" style="width:15.6%;background:var(--accent)"></div></div>
+              <button class="btn-secondary">保存并退出</button>
+            </div>
+          </div>
+
+          <!-- 主体：原文 + 识别 -->
+          <div class="flex-1 grid grid-cols-2 overflow-hidden">
+
+            <!-- 左 · 原图 -->
+            <div class="flex flex-col" style="border-right:1px solid var(--hair)">
+              <div class="px-5 py-2.5 flex items-center justify-between" style="background:var(--surface-2);border-bottom:1px solid var(--hair)">
+                <p class="text-xs text-ink-muted font-medium">原文扫描 · 第 47 页</p>
+                <div class="flex items-center gap-1">
+                  <button class="w-6 h-6 rounded-[6px] text-ink-muted hover:text-ink transition flex items-center justify-center" style="border:1px solid var(--hair);background:#fff">−</button>
+                  <span class="text-[11px] text-ink-muted mx-1 font-mono">100%</span>
+                  <button class="w-6 h-6 rounded-[6px] text-ink-muted hover:text-ink transition flex items-center justify-center" style="border:1px solid var(--hair);background:#fff">+</button>
+                </div>
+              </div>
+              <div class="flex-1 overflow-y-auto custom-scrollbar p-6" style="background:#EEF0F2">
+                <div class="bg-white rounded-card shadow-sm p-7 max-w-md mx-auto text-sm leading-relaxed text-slate-700" style="border:1px solid var(--hair)">
+                  <p class="text-xs text-ink-faint mb-2 font-mono">— 47 —</p>
+                  <p class="font-bold text-ink text-base mb-2">5.2 膜厚控制</p>
+                  <p class="mb-2">5.2.1 介质膜厚定义为相邻两层电极之间的瓷介质厚度。</p>
+                  <p class="mb-2">5.2.2 膜厚测量采用切片显微镜法，按 GB/T XXXX 执行。</p>
+                  <p class="mb-2">5.2.3 膜厚应控制在 <span class="px-1 rounded" style="background:rgba(245,158,11,0.28);box-shadow:0 0 0 1.5px var(--st-review)">50±5μm</span> 范围内，超出此范围将...</p>
+                  <p class="text-ink-faint text-xs mt-4">[扫描图中此处文字略模糊]</p>
+                </div>
+              </div>
+              <div class="px-5 py-2.5 flex items-center justify-between" style="background:var(--surface-2);border-top:1px solid var(--hair)">
+                <button class="btn-secondary !py-1.5 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15 19l-7-7 7-7"/></svg>上一处</button>
+                <p class="text-[11px] text-ink-faint font-mono">第 5 处 / 共 32 处</p>
+                <button class="btn-secondary !py-1.5 flex items-center gap-1.5">下一处<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 5l7 7-7 7"/></svg></button>
+              </div>
+            </div>
+
+            <!-- 右 · 识别结果 -->
+            <div class="flex flex-col">
+              <div class="px-5 py-2.5" style="background:var(--surface-2);border-bottom:1px solid var(--hair)">
+                <p class="text-xs text-ink-muted font-medium">VLM 识别结果</p>
+              </div>
+              <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+                <div class="text-sm leading-relaxed text-ink">
+                  <h3 class="font-semibold text-ink text-base mb-2">5.2.3 膜厚控制</h3>
+                  <p>膜厚应控制在 <span class="notsure">50±5μm</span> 范围内，超出此范围将导致击穿电压不达标，并显著影响产品可靠性。</p>
+                </div>
+
+                <div class="rounded-card p-4" style="background:#fff;border:1px solid var(--hair);box-shadow:inset 3px 0 0 var(--st-review)">
+                  <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4" style="color:var(--st-review)" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <p class="text-xs font-semibold" style="color:#B45309">VLM 不确定 · 请确认</p>
+                  </div>
+                  <label class="text-xs text-ink-muted font-medium mb-1.5 block">识别内容</label>
+                  <textarea class="field mb-3 font-mono text-sm" rows="2">50±5μm</textarea>
+                  <p class="text-xs text-ink-muted mb-4">置信度 <span class="font-mono font-semibold" style="color:#B45309">63%</span> · 原因：扫描件局部模糊</p>
+
+                  <div class="grid grid-cols-3 gap-2">
+                    <button class="btn-secondary !py-2">跳过</button>
+                    <button class="btn-secondary !py-2" style="color:#15803D;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06)">标记正确</button>
+                    <button class="btn-primary !py-2">修改并保存</button>
+                  </div>
+                </div>
+
+                <details class="rounded-card p-3.5 text-xs text-ink-muted" style="background:var(--surface-2);border:1px solid var(--hair)">
+                  <summary class="cursor-pointer font-medium text-ink">改动留痕（who / when / before / after）</summary>
+                  <ul class="mt-3 space-y-2">
+                    <li><span class="text-ink-faint font-mono">2026-05-26 14:35</span> · 张工 · 修改并保存：<code class="font-mono" style="color:#B45309">50μm</code> → <code class="font-mono" style="color:#15803D">50±5μm</code></li>
+                    <li><span class="text-ink-faint font-mono">2026-05-26 14:33</span> · 张工 · 标记正确</li>
+                  </ul>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 6 · 知识库 / 知识库列表 -->
+      <!-- ============================================================== -->
+      <section data-view="kb-list" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">知识库管理</p>
+          <nav class="space-y-0.5">
+            <a class="side-link">上传</a>
+            <a class="side-link">任务队列<span class="ml-auto chip">5</span></a>
+            <a class="side-link">待 review<span class="ml-auto chip">3</span></a>
+            <a class="side-link active">知识库</a>
+          </nav>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h1 class="text-xl font-semibold text-ink tracking-tight">知识库</h1>
+              <p class="text-sm text-ink-muted mt-0.5">共 4 个知识库 · 共 281 份文档</p>
+            </div>
+            <button class="btn-primary">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+              新建知识库
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+
+            <div class="rounded-container p-5 transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-start justify-between mb-4">
+                <div class="tile w-11 h-11 rounded-card text-base">瓷</div>
+                <span class="badge badge-done"><span class="dot dot-done"></span>健康</span>
+              </div>
+              <p class="text-[15px] font-semibold text-ink mb-0.5">瓷片电容库</p>
+              <p class="text-xs text-ink-muted mb-5">片式多层瓷介电容相关工艺与检验</p>
+              <div class="grid grid-cols-3 gap-2 mb-5">
+                <div><p class="text-lg font-semibold text-ink font-mono">128</p><p class="text-[11px] text-ink-faint">文档</p></div>
+                <div><p class="text-lg font-semibold font-mono" style="color:#B45309">32</p><p class="text-[11px] text-ink-faint">待 review</p></div>
+                <div><p class="text-lg font-semibold text-ink font-mono">4</p><p class="text-[11px] text-ink-faint">关联角色</p></div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="btn-primary flex-1 !py-2">进入</button>
+                <button class="btn-secondary !py-2">设置</button>
+              </div>
+            </div>
+
+            <div class="rounded-container p-5 transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-start justify-between mb-4">
+                <div class="tile w-11 h-11 rounded-card text-base">芯</div>
+                <span class="badge badge-done"><span class="dot dot-done"></span>健康</span>
+              </div>
+              <p class="text-[15px] font-semibold text-ink mb-0.5">芯片库</p>
+              <p class="text-xs text-ink-muted mb-5">芯片设计与生产工艺资料</p>
+              <div class="grid grid-cols-3 gap-2 mb-5">
+                <div><p class="text-lg font-semibold text-ink font-mono">89</p><p class="text-[11px] text-ink-faint">文档</p></div>
+                <div><p class="text-lg font-semibold text-ink-faint font-mono">0</p><p class="text-[11px] text-ink-faint">待 review</p></div>
+                <div><p class="text-lg font-semibold text-ink font-mono">2</p><p class="text-[11px] text-ink-faint">关联角色</p></div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="btn-primary flex-1 !py-2">进入</button>
+                <button class="btn-secondary !py-2">设置</button>
+              </div>
+            </div>
+
+            <div class="rounded-container p-5 transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-start justify-between mb-4">
+                <div class="tile w-11 h-11 rounded-card text-base">检</div>
+                <span class="badge badge-review"><span class="dot dot-review"></span>待 review</span>
+              </div>
+              <p class="text-[15px] font-semibold text-ink mb-0.5">检验标准库</p>
+              <p class="text-xs text-ink-muted mb-5">质量检验标准、SOP、GB / 国军标</p>
+              <div class="grid grid-cols-3 gap-2 mb-5">
+                <div><p class="text-lg font-semibold text-ink font-mono">56</p><p class="text-[11px] text-ink-faint">文档</p></div>
+                <div><p class="text-lg font-semibold font-mono" style="color:#B45309">15</p><p class="text-[11px] text-ink-faint">待 review</p></div>
+                <div><p class="text-lg font-semibold text-ink font-mono">6</p><p class="text-[11px] text-ink-faint">关联角色</p></div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="btn-primary flex-1 !py-2">进入</button>
+                <button class="btn-secondary !py-2">设置</button>
+              </div>
+            </div>
+
+            <div class="rounded-container p-5 transition hover:border-hair-strong" style="background:#fff;border:1px solid var(--hair)">
+              <div class="flex items-start justify-between mb-4">
+                <div class="tile w-11 h-11 rounded-card text-base">全</div>
+                <span class="badge badge-done"><span class="dot dot-done"></span>健康</span>
+              </div>
+              <p class="text-[15px] font-semibold text-ink mb-0.5">全员库</p>
+              <p class="text-xs text-ink-muted mb-5">公司公共文档 · 全员可见</p>
+              <div class="grid grid-cols-3 gap-2 mb-5">
+                <div><p class="text-lg font-semibold text-ink font-mono">8</p><p class="text-[11px] text-ink-faint">文档</p></div>
+                <div><p class="text-lg font-semibold text-ink-faint font-mono">0</p><p class="text-[11px] text-ink-faint">待 review</p></div>
+                <div><p class="text-lg font-semibold text-ink font-mono">全部</p><p class="text-[11px] text-ink-faint">关联角色</p></div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="btn-primary flex-1 !py-2">进入</button>
+                <button class="btn-secondary !py-2">设置</button>
+              </div>
+            </div>
+
+            <!-- 新建占位 -->
+            <button class="rounded-container p-5 flex flex-col items-center justify-center text-ink-muted hover:text-ink transition min-h-[256px]" style="background:#FAFAFB;border:1.5px dashed var(--hair-strong)">
+              <div class="w-11 h-11 rounded-card flex items-center justify-center mb-3" style="background:var(--surface-2);border:1px solid var(--hair)">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+              </div>
+              <p class="text-sm font-medium">新建知识库</p>
+              <p class="text-[11px] text-ink-faint mt-1">命名 · 配置角色 · 上传文档</p>
+            </button>
+
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 7 · 系统 / 用户管理 -->
+      <!-- ============================================================== -->
+      <section data-view="sys-users" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">系统</p>
+          <nav class="space-y-0.5">
+            <a class="side-link active"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>用户管理</a>
+            <a class="side-link"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>角色管理</a>
+          </nav>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h1 class="text-xl font-semibold text-ink tracking-tight">用户管理</h1>
+              <p class="text-sm text-ink-muted mt-0.5">共 24 名用户 · 3 名管理员</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="relative">
+                <input class="field !py-2 !pl-9 !w-64" placeholder="搜索姓名 / 工号" />
+                <svg class="absolute left-3 top-2.5 w-4 h-4 text-ink-faint" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4-4"/></svg>
+              </div>
+              <button class="btn-primary">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+                新建用户
+              </button>
+            </div>
+          </div>
+
+          <div class="rounded-container overflow-hidden" style="border:1px solid var(--hair)">
+            <table class="w-full">
+              <thead style="background:var(--surface-2)">
+                <tr>
+                  <th class="th">用户</th>
+                  <th class="th">业务角色</th>
+                  <th class="th">功能角色</th>
+                  <th class="th">可见知识库</th>
+                  <th class="th">最近登录</th>
+                  <th class="th">状态</th>
+                  <th class="th text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="avatar w-8 h-8 rounded-full text-xs">李</div>
+                      <div>
+                        <p class="font-medium">小李</p>
+                        <p class="text-[11px] text-ink-faint font-mono">li.ming@torch.cn</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="td"><span class="chip">瓷片电容研发</span></td>
+                  <td class="td"><span class="chip">普通用户</span></td>
+                  <td class="td td-muted">瓷片库, 全员库</td>
+                  <td class="td td-muted">2 分钟前</td>
+                  <td class="td"><span class="badge badge-done"><span class="dot dot-done"></span>在线</span></td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">禁用</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="avatar w-8 h-8 rounded-full text-xs">王</div>
+                      <div>
+                        <p class="font-medium">小王</p>
+                        <p class="text-[11px] text-ink-faint font-mono">wang.fang@torch.cn</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="td"><span class="chip">瓷片电容研发</span></td>
+                  <td class="td"><span class="chip">管理员</span></td>
+                  <td class="td td-muted">瓷片库, 全员库</td>
+                  <td class="td td-muted">14 分钟前</td>
+                  <td class="td"><span class="badge badge-queue"><span class="dot dot-queue"></span>离线</span></td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">禁用</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="avatar w-8 h-8 rounded-full text-xs">张</div>
+                      <div>
+                        <p class="font-medium">老张</p>
+                        <p class="text-[11px] text-ink-faint font-mono">zhang.wei@torch.cn</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="td"><div class="flex flex-wrap gap-1"><span class="chip">瓷片</span><span class="chip">芯片</span><span class="chip">检验</span></div></td>
+                  <td class="td"><span class="chip">管理员</span></td>
+                  <td class="td td-muted">所有库</td>
+                  <td class="td td-muted">现在</td>
+                  <td class="td"><span class="badge badge-done"><span class="dot dot-done"></span>在线</span></td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">禁用</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5">
+                      <div class="avatar w-8 h-8 rounded-full text-xs">陈</div>
+                      <div>
+                        <p class="font-medium">小陈</p>
+                        <p class="text-[11px] text-ink-faint font-mono">chen.lan@torch.cn</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="td"><span class="chip">质量检验</span></td>
+                  <td class="td"><span class="chip">普通用户</span></td>
+                  <td class="td td-muted">检验库, 全员库</td>
+                  <td class="td td-muted">1 小时前</td>
+                  <td class="td"><span class="badge badge-queue"><span class="dot dot-queue"></span>离线</span></td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">禁用</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td">
+                    <div class="flex items-center gap-2.5 opacity-50">
+                      <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium" style="background:var(--ink-faint)">刘</div>
+                      <div>
+                        <p class="font-medium line-through">小刘</p>
+                        <p class="text-[11px] text-ink-faint font-mono">liu.fei@torch.cn</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted">—</td>
+                  <td class="td td-muted">3 天前</td>
+                  <td class="td"><span class="chip">已禁用</span></td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3">启用</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="flex items-center justify-between mt-4">
+            <p class="text-xs text-ink-faint">显示 1-5 / 24</p>
+            <div class="flex items-center gap-1">
+              <button class="w-8 h-8 rounded-control text-ink-muted hover:bg-canvas transition flex items-center justify-center" style="border:1px solid var(--hair)">←</button>
+              <button class="w-8 h-8 rounded-control text-white text-xs font-medium flex items-center justify-center" style="background:var(--ink)">1</button>
+              <button class="w-8 h-8 rounded-control text-ink-muted hover:bg-canvas transition flex items-center justify-center text-xs" style="border:1px solid var(--hair)">2</button>
+              <button class="w-8 h-8 rounded-control text-ink-muted hover:bg-canvas transition flex items-center justify-center text-xs" style="border:1px solid var(--hair)">3</button>
+              <button class="w-8 h-8 rounded-control text-ink-muted hover:bg-canvas transition flex items-center justify-center" style="border:1px solid var(--hair)">→</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 8 · 系统 / 角色管理 -->
+      <!-- ============================================================== -->
+      <section data-view="sys-roles" class="view-pane hidden flex-1 flex gap-3 animate-enter">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">系统</p>
+          <nav class="space-y-0.5">
+            <a class="side-link">用户管理</a>
+            <a class="side-link active">角色管理</a>
+          </nav>
+        </aside>
+
+        <section class="flex-1 panel rounded-container p-7 overflow-y-auto custom-scrollbar">
+          <div class="flex items-center justify-between mb-1.5">
+            <h1 class="text-xl font-semibold text-ink tracking-tight">角色管理</h1>
+            <button class="btn-primary" data-jump="sys-role-modal">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+              新建业务角色
+            </button>
+          </div>
+          <p class="text-sm text-ink-muted mb-5">业务角色由管理员动态创建，决定用户能进入哪些知识库。</p>
+
+          <!-- 内置功能角色（说明区） -->
+          <div class="rounded-card p-3.5 mb-5 flex items-center gap-3.5" style="background:var(--surface-2);border:1px solid var(--hair)">
+            <svg class="w-5 h-5 flex-shrink-0" style="color:var(--accent)" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <div class="flex-1 text-xs text-ink-muted">
+              <p><strong class="text-ink font-medium">功能角色（内置不可删）：</strong> <span class="chip ml-1">普通用户</span> 仅聊天问答 <span class="mx-1.5 text-hair-strong">·</span> <span class="chip">管理员</span> 全局上传 / Review / 用户管理 / 角色管理</p>
+            </div>
+          </div>
+
+          <p class="text-sm text-ink-muted font-medium mb-2.5">业务角色（4）</p>
+
+          <div class="rounded-container overflow-hidden" style="border:1px solid var(--hair)">
+            <table class="w-full">
+              <thead style="background:var(--surface-2)">
+                <tr>
+                  <th class="th">角色名</th>
+                  <th class="th">描述</th>
+                  <th class="th">关联知识库</th>
+                  <th class="th">用户数</th>
+                  <th class="th text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row">
+                  <td class="td"><span class="chip">瓷片电容研发</span></td>
+                  <td class="td td-muted">瓷片电容研发组成员</td>
+                  <td class="td"><div class="flex gap-1 flex-wrap"><span class="chip">瓷片库</span><span class="chip">全员库</span></div></td>
+                  <td class="td font-medium font-mono">12</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">删除</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td"><span class="chip">芯片研发</span></td>
+                  <td class="td td-muted">芯片研发组成员</td>
+                  <td class="td"><div class="flex gap-1 flex-wrap"><span class="chip">芯片库</span><span class="chip">全员库</span></div></td>
+                  <td class="td font-medium font-mono">8</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">删除</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td"><span class="chip">质量检验</span></td>
+                  <td class="td td-muted">QC 团队</td>
+                  <td class="td"><div class="flex gap-1 flex-wrap"><span class="chip">检验库</span><span class="chip">全员库</span></div></td>
+                  <td class="td font-medium font-mono">5</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">删除</button></td>
+                </tr>
+                <tr class="row">
+                  <td class="td"><span class="chip">全角色</span></td>
+                  <td class="td td-muted">管理员 / 资深工程师</td>
+                  <td class="td"><span class="chip">所有库</span></td>
+                  <td class="td font-medium font-mono">3</td>
+                  <td class="td text-right"><button class="btn-secondary !py-1 !px-3 mr-1">编辑</button><button class="btn-danger !py-1 !px-3">删除</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+
+      <!-- ============================================================== -->
+      <!-- 视图 9 · 系统 / 新建角色弹窗 -->
+      <!-- ============================================================== -->
+      <section data-view="sys-role-modal" class="view-pane hidden flex-1 flex gap-3 animate-enter relative">
+        <aside class="w-60 panel rounded-container p-4 flex flex-col opacity-50">
+          <p class="text-xs text-ink-subtle font-medium px-1 mb-2.5">系统</p>
+          <nav class="space-y-0.5">
+            <a class="side-link">用户管理</a>
+            <a class="side-link active">角色管理</a>
+          </nav>
+        </aside>
+        <section class="flex-1 panel rounded-container p-7 opacity-50 overflow-hidden">
+          <div class="flex items-center justify-between mb-5">
+            <h1 class="text-xl font-semibold text-ink">角色管理</h1>
+          </div>
+          <div class="rounded-container h-64" style="background:var(--surface-2)"></div>
+        </section>
+
+        <!-- 弹窗遮罩 -->
+        <div class="absolute inset-0 rounded-container" style="background:rgba(16,24,40,0.28);backdrop-filter:blur(2px)"></div>
+
+        <!-- 弹窗主体（唯一用玻璃的地方） -->
+        <div class="absolute inset-0 flex items-center justify-center p-6">
+          <div class="glass rounded-container w-full max-w-lg animate-enter">
+            <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--hair)">
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-card flex items-center justify-center text-white" style="background:var(--ink)">
+                  <svg class="w-4.5 h-4.5" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+                </div>
+                <h2 class="text-base font-semibold text-ink">新建业务角色</h2>
+              </div>
+              <button class="text-ink-faint hover:text-ink transition" data-jump="sys-roles" title="关闭"><svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+            </div>
+
+            <div class="px-6 py-5 space-y-4">
+              <div>
+                <label class="text-sm text-ink-muted font-medium mb-1.5 block">角色名称 <span style="color:var(--st-fail)">*</span></label>
+                <input class="field" placeholder="例如：膜厚工艺组" />
+              </div>
+              <div>
+                <label class="text-sm text-ink-muted font-medium mb-1.5 block">角色描述</label>
+                <textarea class="field" rows="2" placeholder="该角色的职责与边界，便于团队后续维护"></textarea>
+              </div>
+              <div>
+                <label class="text-sm text-ink-muted font-medium mb-2 block">关联知识库（可多选） <span style="color:var(--st-fail)">*</span></label>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-3 rounded-card px-3.5 py-2.5 cursor-pointer transition hover:bg-canvas" style="background:#fff;border:1px solid var(--hair)">
+                    <input type="checkbox" checked class="w-4 h-4 rounded" style="accent-color:var(--accent)" />
+                    <span class="tile w-8 h-8 rounded-[6px] text-xs">瓷</span>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-ink">瓷片电容库</p>
+                      <p class="text-[11px] text-ink-faint">128 份文档 · 32 处待 review</p>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-3 rounded-card px-3.5 py-2.5 cursor-pointer transition hover:bg-canvas" style="background:#fff;border:1px solid var(--hair)">
+                    <input type="checkbox" checked class="w-4 h-4 rounded" style="accent-color:var(--accent)" />
+                    <span class="tile w-8 h-8 rounded-[6px] text-xs">全</span>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-ink">全员库</p>
+                      <p class="text-[11px] text-ink-faint">8 份文档 · 全员可见</p>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-3 rounded-card px-3.5 py-2.5 cursor-pointer transition hover:bg-canvas" style="background:#fff;border:1px solid var(--hair)">
+                    <input type="checkbox" class="w-4 h-4 rounded" style="accent-color:var(--accent)" />
+                    <span class="tile w-8 h-8 rounded-[6px] text-xs">芯</span>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-ink">芯片库</p>
+                      <p class="text-[11px] text-ink-faint">89 份文档</p>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-3 rounded-card px-3.5 py-2.5 cursor-pointer transition hover:bg-canvas" style="background:#fff;border:1px solid var(--hair)">
+                    <input type="checkbox" class="w-4 h-4 rounded" style="accent-color:var(--accent)" />
+                    <span class="tile w-8 h-8 rounded-[6px] text-xs">检</span>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-ink">检验标准库</p>
+                      <p class="text-[11px] text-ink-faint">56 份文档 · 15 处待 review</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="px-6 py-4 flex items-center justify-end gap-2.5 rounded-b-container" style="border-top:1px solid var(--hair)">
+              <button class="btn-secondary" data-jump="sys-roles">取消</button>
+              <button class="btn-primary" data-jump="sys-roles">保存</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+    </div>
+  </main>
+
+  <script>
+    /* ============================================================
+       1. 视图切换框架
+    ============================================================ */
+    const switcher = document.getElementById('page-switcher');
+    const panes = document.querySelectorAll('.view-pane');
+    const topbarLinks = document.querySelectorAll('.topbar-link');
+
+    const navMap = {
+      'chat':'chat','kb-upload':'kb','kb-queue':'kb','kb-review-list':'kb',
+      'kb-review-detail':'kb','kb-list':'kb','sys-users':'sys','sys-roles':'sys','sys-role-modal':'sys',
+    };
+
+    function switchPage(name) {
+      panes.forEach(el => el.classList.toggle('hidden', el.dataset.view !== name));
+      const active = document.querySelector(`.view-pane[data-view="${name}"]`);
+      if (active) { active.style.animation = 'none'; void active.offsetWidth; active.style.animation = ''; }
+      const nav = navMap[name] || 'chat';
+      topbarLinks.forEach(el => el.classList.toggle('active', el.dataset.nav === nav));
+      switcher.value = name;
+    }
+    switcher.addEventListener('change', e => switchPage(e.target.value));
+
+    /* 2. TopBar → 子模块默认页 */
+    topbarLinks.forEach(el => {
+      el.addEventListener('click', () => {
+        const defaults = { chat: 'chat', kb: 'kb-upload', sys: 'sys-users' };
+        switchPage(defaults[el.dataset.nav]);
+      });
+    });
+
+    /* 3. SideBar：按文本映射 view */
+    const sideViewMap = [
+      [/上传/, 'kb-upload'], [/任务队列/, 'kb-queue'], [/待\s*review/i, 'kb-review-list'],
+      [/^知识库$/, 'kb-list'], [/用户管理/, 'sys-users'], [/角色管理/, 'sys-roles'],
+    ];
+    document.querySelectorAll('.side-link').forEach(el => {
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('.chip,svg').forEach(n => n.remove());
+      const text = clone.textContent.trim();
+      for (const [re, view] of sideViewMap) {
+        if (re.test(text)) { el.dataset.view = view; el.style.cursor = 'pointer'; el.addEventListener('click', () => switchPage(view)); break; }
+      }
+    });
+
+    /* 4. data-jump 跳转 */
+    document.querySelectorAll('[data-jump]').forEach(el => {
+      el.addEventListener('click', e => { e.stopPropagation(); switchPage(el.dataset.jump); });
+    });
+
+    /* 5. 引用面板 MD / PDF 切换 */
+    const refTabs = document.querySelectorAll('#ref-tabs .ref-tab');
+    refTabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        refTabs.forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.ref-card').forEach(card => {
+          card.querySelectorAll('.ref-md').forEach(el => el.classList.toggle('hidden', tab !== 'md'));
+          card.querySelectorAll('.ref-pdf').forEach(el => el.classList.toggle('hidden', tab !== 'pdf'));
+        });
+      });
+    });
+
+    /* 6. 徽标 ↔ 卡片 双向联动 */
+    function setActiveRef(ref) {
+      document.querySelectorAll('.cite').forEach(b => b.classList.toggle('active', b.dataset.ref === ref));
+      document.querySelectorAll('.ref-card').forEach(c => {
+        const on = c.dataset.refCard === ref;
+        c.classList.toggle('ref-active', on);
+        if (on) c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+    document.querySelectorAll('.cite[data-ref]').forEach(b => {
+      b.addEventListener('mouseenter', () => setActiveRef(b.dataset.ref));
+      b.addEventListener('click', () => setActiveRef(b.dataset.ref));
+    });
+    document.querySelectorAll('.ref-card').forEach(c => {
+      c.addEventListener('mouseenter', () => setActiveRef(c.dataset.refCard));
+      c.addEventListener('click', () => setActiveRef(c.dataset.refCard));
+    });
+
+    /* 7. 输入框自适应高度 */
+    const ta = document.querySelector('[data-view="chat"] textarea');
+    if (ta) ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 128) + 'px'; });
+
+    /* 8. 会话列表点击高亮 */
+    document.querySelectorAll('[data-view="chat"] .conv-item').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('[data-view="chat"] .conv-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+      });
+    });
+
+    /* 9. tool-call 折叠箭头旋转 */
+    const tc = document.getElementById('tool-call');
+    if (tc) tc.addEventListener('toggle', () => {
+      const arrow = tc.querySelector('.tool-arrow');
+      if (arrow) arrow.style.transform = tc.open ? 'rotate(90deg)' : 'rotate(0deg)';
+    });
+
+    /* 10. 队列状态筛选切换 */
+    document.querySelectorAll('[data-view="kb-queue"] .qfilter').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-view="kb-queue"] .qfilter').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

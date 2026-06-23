@@ -1,0 +1,70 @@
+[project]
+name = "torch-knowledge-base-backend"
+version = "0.1.0"
+description = "火炬电子知识库 v0 后端"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "sqlmodel>=0.0.22",
+  "aiosqlite>=0.20.0",
+  "greenlet>=3.0.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.5.0",
+  "structlog>=24.4.0",
+  "openai>=1.50.0",
+  "httpx>=0.27.0",
+  "langgraph>=0.2.0",
+  "python-multipart>=0.0.12",
+  "bm25s>=0.3.9",
+  "jieba>=0.42.1",
+  "langchain-openai>=1.3.2",
+  "litellm>=1.89.3",
+  "pyyaml>=6.0.3",
+  "pypdf2>=3.0.1",
+  "pymupdf>=1.27.2.3",
+  "click>=8.4.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.6.0",
+  "pyright>=1.1.380",
+  "httpx>=0.27.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# vendored 第三方引擎源码（整包搬入、不重构）——豁免 lint，保持与上游一致
+extend-exclude = ["app/core/pageindex", "app/core/docparse"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = [
+  "S101",  # pytest 用 assert
+  "B008",  # FastAPI Depends/File 必须在 default 调用，是官方推荐用法
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 搬迁测试（来自 pageindex-agent）：长数据行 / 分号多语句 / clone 的单字母变量名，
+# 属测试夹具风格，逐行改纯属噪声，不值得动
+"tests/**" = ["E501", "E702", "E741", "E402"]
+# 工具 docstring 与 SYSTEM_PROMPT 都是给 agent 的 prompt 文本，折行会改变提示词，豁免行长
+"app/modules/chat/tools.py" = ["E501"]
+"app/modules/chat/prompt.py" = ["E501"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+# 类型门禁聚焦生产代码；测试用动态 stub 夹具（搬自 pageindex-agent），类型噪声大、
+# 价值低，正确性由 pytest 保证
+include = ["app"]
+# vendored 第三方引擎源码（整包搬入、不重构）——豁免类型检查
+exclude = ["app/core/pageindex", "app/core/docparse"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
