@@ -1,9 +1,14 @@
 import json
+import logging
 from pathlib import Path
 
 import bm25s
 
+from app.core.fsutil import write_text_atomic
+
 from .tokenize import tokenize
+
+log = logging.getLogger("retrieval.bm25")
 
 TITLE_BOOST = 3
 SUMMARY_BOOST = 2
@@ -40,15 +45,20 @@ class BM25Index:
         dir_path = Path(dir_path)
         dir_path.mkdir(parents=True, exist_ok=True)
         self._retriever.save(str(dir_path / "bm25"), show_progress=False)
-        (dir_path / "meta.json").write_text(
-            json.dumps(self._meta, ensure_ascii=False), encoding="utf-8")
+        # meta.json 原子写，避免并发 TreeStore 重载读到写一半的文件
+        write_text_atomic(dir_path / "meta.json", json.dumps(self._meta, ensure_ascii=False))
 
     @classmethod
     def load(cls, dir_path):
+        """加载失败（重建中途读到、文件损坏）返回 None → TreeStore 退化为"索引不可用"而非 500。"""
         dir_path = Path(dir_path)
-        retriever = bm25s.BM25.load(str(dir_path / "bm25"), load_corpus=False)
-        meta = json.loads((dir_path / "meta.json").read_text(encoding="utf-8"))
-        return cls(retriever, meta)
+        try:
+            retriever = bm25s.BM25.load(str(dir_path / "bm25"), load_corpus=False)
+            meta = json.loads((dir_path / "meta.json").read_text(encoding="utf-8"))
+            return cls(retriever, meta)
+        except Exception:
+            log.warning("bm25_index_load_failed", exc_info=True)
+            return None
 
 
 def build_index(records: list) -> BM25Index:

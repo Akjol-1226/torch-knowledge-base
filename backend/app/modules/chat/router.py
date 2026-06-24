@@ -63,14 +63,16 @@ def _build_messages(req: "ChatRequest") -> list:
 @router.post("")
 async def chat_once(req: ChatRequest) -> JSONResponse:
     """非流式问答（调试 / 简单集成用）；前端对话页走 /chat/stream。"""
+    token = current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）；务必配对 reset
     try:
-        current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）
         result = await get_agent().ainvoke({"messages": _build_messages(req)})
         answer = result["messages"][-1].content
         return JSONResponse({"answer": answer, "sources": []})
     except Exception:
         log.exception("chat_failed")
         return JSONResponse({"error": "服务出错，请稍后重试"}, status_code=500)
+    finally:
+        current_kbs.reset(token)
 
 
 @router.post("/stream")
@@ -78,38 +80,41 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     turn = uuid.uuid4().hex[:8]
 
     async def gen():
-        current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）
+        token = current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）；务必配对 reset
         log.info("chat_query", turn=turn, turns=len(req.history or []), msg=req.message[:200])
         answer_text = ""
         answer_sources: list = []
         try:
-            astream = get_agent().astream(
-                {"messages": _build_messages(req)},
-                stream_mode=["updates", "messages"],
-            )
-            async for ev in events_from_astream(astream):
-                if ev.get("type") == "answer":
-                    answer_text = ev.get("text") or answer_text
-                    answer_sources = ev.get("sources") or answer_sources
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception:
-            log.exception("chat_stream_failed", turn=turn)
-            # 独立 error 事件，前端按错误处理；不可发 answer 假装回答完成
-            err = {"type": "error", "text": "服务出错，请稍后重试"}
-            yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
-            return
-        # 流正常结束后持久化本轮（仅当前端带了 conversation_id）
-        if req.conversation_id and answer_text:
             try:
-                await run_in_threadpool(
-                    conversation_service.append_turn,
-                    req.conversation_id,
-                    req.message,
-                    answer_text,
-                    answer_sources,
+                astream = get_agent().astream(
+                    {"messages": _build_messages(req)},
+                    stream_mode=["updates", "messages"],
                 )
+                async for ev in events_from_astream(astream):
+                    if ev.get("type") == "answer":
+                        answer_text = ev.get("text") or answer_text
+                        answer_sources = ev.get("sources") or answer_sources
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
             except Exception:
-                log.exception("conv_persist_failed", turn=turn)
+                log.exception("chat_stream_failed", turn=turn)
+                # 独立 error 事件，前端按错误处理；不可发 answer 假装回答完成
+                err = {"type": "error", "text": "服务出错，请稍后重试"}
+                yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
+                return
+            # 流正常结束后持久化本轮（仅当前端带了 conversation_id）
+            if req.conversation_id and answer_text:
+                try:
+                    await run_in_threadpool(
+                        conversation_service.append_turn,
+                        req.conversation_id,
+                        req.message,
+                        answer_text,
+                        answer_sources,
+                    )
+                except Exception:
+                    log.exception("conv_persist_failed", turn=turn)
+        finally:
+            current_kbs.reset(token)  # 配对 set，防 contextvar 跨请求残留
 
     return StreamingResponse(
         gen(),

@@ -12,6 +12,7 @@ import os
 import re
 from pathlib import Path
 
+from app.core.fsutil import write_text_atomic
 from app.core.logging import get_logger
 
 log = get_logger("ingest.ocr")
@@ -29,7 +30,7 @@ def _sidecar(md_path: str | Path) -> Path:
 
 # ---------------- 入库:OCR 落侧车 ----------------
 def _enable_cuda_dlls() -> None:
-    """把 nvidia pip 库(cudnn/cublas/...)的 bin 目录塞进 PATH,让 onnxruntime CUDA EP 能加载依赖 DLL。
+    """把 nvidia pip 库(cudnn/cublas/...)的 bin 目录塞进 PATH,让 onnxruntime CUDA EP 加载依赖 DLL。
     Windows 上 os.add_dll_directory 对传递依赖不可靠,必须改 PATH。无 nvidia 包则跳过(走 CPU)。"""
     try:
         import glob
@@ -44,7 +45,7 @@ def _enable_cuda_dlls() -> None:
         os.environ["PATH"] = os.pathsep.join(dirs) + os.pathsep + os.environ.get("PATH", "")
 
 
-def ocr_document(pdf_path: str | Path, dpi: int = 500) -> dict[str, list[dict]]:
+def ocr_document(pdf_path: str | Path, dpi: int = 200) -> dict[str, list[dict]]:
     """逐页 OCR,返回 {页号(str): [{"t": 文本, "b": [x0,y0,x1,y1] 归一化}, ...]}。
 
     有 onnxruntime-gpu + CUDA 时走 GPU(快很多),否则自动回退 CPU。
@@ -55,7 +56,13 @@ def ocr_document(pdf_path: str | Path, dpi: int = 500) -> dict[str, list[dict]]:
     import onnxruntime as ort
     from rapidocr_onnxruntime import RapidOCR
 
-    use_cuda = "CUDAExecutionProvider" in ort.get_available_providers()
+    from app.core.config import get_settings
+
+    # 默认 GPU；OCR_USE_GPU=false 强制 CPU。无 CUDA 库时即便为 True 也会自动回退 CPU。
+    use_cuda = (
+        get_settings().ocr_use_gpu
+        and "CUDAExecutionProvider" in ort.get_available_providers()
+    )
     engine = RapidOCR(det_use_cuda=use_cuda, cls_use_cuda=use_cuda, rec_use_cuda=use_cuda)
     log.info("ocr_engine", device="cuda" if use_cuda else "cpu", dpi=dpi)
     out: dict[str, list[dict]] = {}
@@ -70,7 +77,7 @@ def ocr_document(pdf_path: str | Path, dpi: int = 500) -> dict[str, list[dict]]:
             result, _ = engine(img)
             w, h = pix.width, pix.height
             boxes: list[dict] = []
-            for quad, text, score in result or []:
+            for quad, text, _score in result or []:
                 if not (text or "").strip():
                     continue
                 xs = [p[0] for p in quad]
@@ -86,10 +93,17 @@ def ocr_document(pdf_path: str | Path, dpi: int = 500) -> dict[str, list[dict]]:
     return out
 
 
-def write_ocr_sidecar(pdf_path: str | Path, md_path: str | Path, dpi: int = 500) -> int:
-    """OCR pdf_path,把结果写到 <md_path>.ocr.json。返回总文字框数。"""
+def write_ocr_sidecar(pdf_path: str | Path, md_path: str | Path, dpi: int | None = None) -> int:
+    """OCR pdf_path,把结果写到 <md_path>.ocr.json。返回总文字框数。
+
+    dpi 缺省取 settings.ocr_render_dpi（默认 200；只为画高亮框，不需高清，GPU 上快很多）。
+    """
+    if dpi is None:
+        from app.core.config import get_settings
+
+        dpi = get_settings().ocr_render_dpi
     data = ocr_document(pdf_path, dpi=dpi)
-    _sidecar(md_path).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    write_text_atomic(_sidecar(md_path), json.dumps(data, ensure_ascii=False))
     return sum(len(v) for v in data.values())
 
 
@@ -123,8 +137,10 @@ def _merge_boxes(boxes: list[list[float]]) -> list[list[float]]:
             for o in out:
                 if not (r[0] > o[2] + _GAP_X or r[2] < o[0] - _GAP_X
                         or r[1] > o[3] + _GAP_Y or r[3] < o[1] - _GAP_Y):
-                    o[0] = min(o[0], r[0]); o[1] = min(o[1], r[1])
-                    o[2] = max(o[2], r[2]); o[3] = max(o[3], r[3])
+                    o[0] = min(o[0], r[0])
+                    o[1] = min(o[1], r[1])
+                    o[2] = max(o[2], r[2])
+                    o[3] = max(o[3], r[3])
                     changed = True
                     break
             else:

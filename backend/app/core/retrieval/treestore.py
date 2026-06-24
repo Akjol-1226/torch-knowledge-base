@@ -2,9 +2,17 @@ import json
 import re
 from pathlib import Path
 
+from app.core.config import get_settings
+from app.core.logging import get_logger
+
 from .bm25_index import BM25Index
+from .embed import get_embed_client
+from .fusion import rrf_fuse
 from .snippet import make_snippet
 from .tokenize import load_dict
+from .vector_index import VectorIndex
+
+log = get_logger("retrieval.treestore")
 
 # 通用占位标题（附表1 / 附件2 / 表3 / 图1 等）不参与"同名窗口"分组：
 # 这类标题在不同段落里会重复出现，按标题相等合并会把不相干的表错并成一段。
@@ -24,6 +32,7 @@ class TreeStore:
         self._nodes = {}         # handle -> record
         self._top = {}           # doc_id -> [handle,...] 顶层
         self._bm25 = None
+        self._vec = None         # VectorIndex | None（缺失 → 纯 BM25）
         self._load()
 
     # ---- 加载 ----
@@ -41,6 +50,8 @@ class TreeStore:
         idx_dir = self.data_dir / "indexes"
         if (idx_dir / "meta.json").exists():
             self._bm25 = BM25Index.load(idx_dir)
+        # 向量索引为增强项：缺失/损坏 → None → search_nodes 退回纯 BM25
+        self._vec = VectorIndex.load(idx_dir)
 
     def _index_doc(self, doc):
         doc_id = doc["id"]
@@ -171,17 +182,50 @@ class TreeStore:
         handles = sorted(set(handles), key=lambda h: self._nodes[h]["line_num"])
         return {"part": members.index(node_id) + 1, "total": len(members), "span": handles}
 
+    def _vector_search(self, query: str, top_n: int) -> list:
+        """向量召回 id 列表；任何不可用（无索引/无 client/构建/编码失败/空间不匹配）都返回 []。"""
+        if self._vec is None:
+            return []
+        # 整段（取 client + 编码 + 向量检索）都纳入兜底：任何失败都退回纯 BM25，不让查询 500
+        try:
+            client = get_embed_client()
+            if client is None:
+                return []
+            if self._vec.signature != client.signature:
+                # 索引与当前模型向量空间不一致（换过 embedding 模型）→ 跳过向量，待重建
+                log.warning(
+                    "vector_index_signature_mismatch",
+                    index=self._vec.signature, client=client.signature,
+                )
+                return []
+            qvec = client.embed([query])
+            if qvec.size == 0:
+                return []
+            s = get_settings()
+            hits = self._vec.search(qvec[0], max(s.retrieval_top_n, top_n), s.vec_sim_threshold)
+            return [d["node_id_full"] for d in hits]
+        except Exception:
+            log.warning("vector_search_failed_fallback_bm25", exc_info=True)
+            return []
+
     def search_nodes(self, query: str, top_k: int = 8, kbs=None):
         # 索引缺失要显形，不能静默返回 []（否则 agent 会把"检索不可用"误判成"没找到"）
         if self._bm25 is None:
             return {"error": "检索索引未构建或未加载（请先入库 ingest）"}
         # 多取候选再按 section 折叠 + 按 kb 过滤（检索范围隔离）；kb 过滤会减少命中，故多取候选
         allow = set(kbs) if kbs else None
-        raw = self._bm25.search(query, top_k=top_k * (6 if allow else 3))
+        cand = top_k * (6 if allow else 3)
+        bm25_ids = [h["node_id_full"] for h in self._bm25.search(query, top_k=cand)]
+        # 混合检索：BM25 + 向量 RRF 融合；向量不可用时退回纯 BM25 顺序（结果结构不变）
+        vec_ids = self._vector_search(query, cand)
+        if vec_ids:
+            s = get_settings()
+            fused = rrf_fuse(bm25_ids, vec_ids, w_bm25=s.rrf_w_bm25, w_vec=s.rrf_w_vec, k=s.rrf_k)
+        else:
+            fused = [(i, 0.0) for i in bm25_ids]
         out = []
         seen_section = set()
-        for hit in raw:
-            h = hit["node_id_full"]
+        for h, score in fused:
             n = self._nodes.get(h)
             if not n:
                 continue
@@ -195,10 +239,11 @@ class TreeStore:
                 seen_section.add(key)
             snip = make_snippet(n["text"], query)
             item = {
-                "id": h, "title": n["title"], "score": hit["score"],
+                "id": h, "title": n["title"], "score": score,
                 "snippet": snip,
                 "cite": {"doc": n["doc_name"], "section": n["title"], "lines": n.get("lines", ""),
-                         "handle": h, "doc_id": n["doc_id"], "page": n.get("page"), "snippet": snip},
+                         "handle": h, "doc_id": n["doc_id"], "page": n.get("page"),
+                         "snippet": snip},
                 "path": " > ".join(n["path_titles"]),
                 "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
             }

@@ -36,6 +36,25 @@ class Settings(BaseSettings):
     # 用于切换/灰度不同提示词，不要把大段正文塞进 env。
     chat_system_prompt_path: str = ""
 
+    max_upload_mb: int = 100  # 单文件上传上限（MB）；超过返回 413，防大文件 OOM
+    pdf_render_dpi: int = 500  # PDF→PNG 渲染 DPI（喂 VLM 解析）；.env 的 PDF_RENDER_DPI 覆盖
+    ocr_render_dpi: int = 200  # OCR 侧车渲染 DPI（只画高亮框、不需高清）；与 VLM DPI 解耦，GPU 上快
+    ocr_use_gpu: bool = True  # OCR 默认 GPU(CUDA)；OCR_USE_GPU=false 强制 CPU（无 GPU 也自动回退）
+
+    # —— 混合检索（BM25 + 向量，RRF 融合）。见 docs/plans/2026-06-24-hybrid-retrieval-design.md ——
+    # 向量是增强项、BM25 是底线：embedding 不可用 / 索引缺失 / hybrid off → 自动退回纯 BM25。
+    hybrid_enabled: bool = True
+    # provider: "proxy"（走 LiteLLM Proxy /embeddings）| "local"（预留 onnx 兜底）
+    embedding_provider: str = "proxy"
+    embedding_model: str = "text-embedding-v4"  # provider=proxy 时的模型路由名（Proxy 上的 id）
+    embedding_max_chars: int = 6000  # 单节点编码输入截断（字符近似，给 ~8K token 留余量）
+    embedding_batch_size: int = 10  # 每次 /embeddings 请求条数（Qwen embedding 家族保守取 10）
+    retrieval_top_n: int = 50  # 向量召回候选数
+    rrf_k: int = 60  # RRF 平滑常数
+    rrf_w_bm25: float = 0.6  # BM25 一路权重（主）
+    rrf_w_vec: float = 0.4  # 向量一路权重（辅）
+    vec_sim_threshold: float = 0.30  # 向量准入阈值：余弦相似度低于此的命中不参与融合
+
     def apply_litellm_env(self) -> None:
         """把 LiteLLM Proxy 凭证写进 OPENAI_* env。
 
@@ -69,9 +88,9 @@ class Settings(BaseSettings):
         # 关闭 qwen3 的 thinking（默认就关，显式声明）：qwen_client 据此传
         # extra_body={"enable_thinking": False}
         os.environ.setdefault("QWEN_ENABLE_THINKING", "false")
-        # DocVisionMD 默认 600DPI 是为 qwen-vl-max（吃高清大图）；gpt-4o vision 对超大图会
-        # hang/超时（内部本就 downscale），降到 200DPI 既够清晰又能正常响应。可用 .env 覆盖。
-        os.environ.setdefault("PDF_RENDER_DPI", "200")
+        # 渲染 DPI 由 config 统一管（pdf_render_dpi，默认 500，.env 可覆盖）。
+        # VLM 现为 qwen 系视觉模型（吃高清大图），用较高 DPI 提升复杂表格/小字解析质量。
+        os.environ["PDF_RENDER_DPI"] = str(self.pdf_render_dpi)
 
 
 @lru_cache

@@ -33,3 +33,27 @@ def test_ingest_dir_writes_all_artifacts(tmp_path, monkeypatch):
     assert "NPD9001" in dict_text
     # BM25 索引文件存在
     assert (out / "indexes" / "meta.json").exists()
+
+
+def test_ingest_dir_disambiguates_same_doc_name(tmp_path, monkeypatch):
+    # 两个不同文件解析出相同 doc_name → 不能互相覆盖，应各得唯一 doc_id（2 篇都在）
+    md_dir = tmp_path / "md"
+    (md_dir / "kbA").mkdir(parents=True)
+    (md_dir / "kbB").mkdir(parents=True)
+    (md_dir / "kbA" / "a.md").write_text("# 标题\n正文A\n", encoding="utf-8")
+    (md_dir / "kbB" / "b.md").write_text("# 标题\n正文B\n", encoding="utf-8")
+
+    def fake_build_tree(md_path, model):
+        return {"doc_name": "同名文档", "doc_description": "d", "line_count": 2,
+                "structure": [{"title": "标题", "node_id": "0001", "line_num": 1,
+                               "summary": "s", "text": "t", "nodes": []}]}
+
+    monkeypatch.setattr(run_mod, "build_tree", fake_build_tree)
+    out = tmp_path / "data"
+    stats = run_mod.ingest_dir(str(md_dir), out, model="fake")
+
+    assert stats["docs"] == 2
+    metas = json.loads((out / "workspace" / "_meta.json").read_text(encoding="utf-8"))
+    assert len(metas) == 2  # 两个不同 doc_id，未互相覆盖
+    ws_files = sorted(p.name for p in (out / "workspace").glob("doc_*.json"))
+    assert len(ws_files) == 2

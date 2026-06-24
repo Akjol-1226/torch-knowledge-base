@@ -25,7 +25,22 @@ dependencies = [
   "pymupdf>=1.27.2.3",
   "click>=8.4.1",
   "rapidocr-onnxruntime>=1.4.4",
+  # OCR 运行时：默认 GPU。onnxruntime-gpu 含 CPUExecutionProvider，无 GPU/CUDA 时自动回退 CPU；
+  # 也可用 OCR_USE_GPU=false 强制 CPU（见 app/modules/ingest/ocr_locate.py）。
+  "onnxruntime-gpu==1.20.1",
+  "nvidia-cublas-cu12==12.9.2.10",
+  "nvidia-cudnn-cu12==9.23.2.1",
+  "nvidia-cuda-runtime-cu12==12.9.79",
+  "nvidia-cuda-nvrtc-cu12==12.9.86",
+  "nvidia-cufft-cu12==11.4.1.4",
+  "nvidia-curand-cu12==10.3.10.19",
+  "nvidia-nvjitlink-cu12==12.9.86",
 ]
+
+[tool.uv]
+# rapidocr-onnxruntime 传递依赖 CPU 版 onnxruntime，与 onnxruntime-gpu 是同名模块、会冲突。
+# 覆盖移除传递的 onnxruntime，统一由 onnxruntime-gpu 提供（它同时含 CPUExecutionProvider）。
+override-dependencies = ["onnxruntime ; sys_platform == 'no-such-platform'"]
 
 [dependency-groups]
 dev = [

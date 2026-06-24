@@ -4,10 +4,13 @@
 """
 
 from .bm25_index import BM25Index, build_index
+from .embed import get_embed_client, set_embed_client
+from .fusion import rrf_fuse
 from .nodes import iter_nodes
 from .snippet import make_snippet
 from .tokenize import load_dict, write_domain_terms
 from .treestore import TreeStore
+from .vector_index import VectorIndex
 
 # 注意：不在此导出 tokenize 函数——它与子模块 `tokenize` 同名，导出会遮蔽子模块，
 # 让 `import app.core.retrieval.tokenize as tk` 拿到函数而非模块。需要分词函数时用
@@ -20,4 +23,8 @@ __all__ = [
     "make_snippet",
     "load_dict",
     "write_domain_terms",
+    "VectorIndex",
+    "rrf_fuse",
+    "get_embed_client",
+    "set_embed_client",
 ]

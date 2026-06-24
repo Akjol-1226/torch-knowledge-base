@@ -32,3 +32,11 @@ def test_save_load_roundtrip(tmp_path):
     idx2 = BM25Index.load(tmp_path / "idx")
     hits = idx2.search("检验", top_k=1)
     assert hits[0]["node_id_full"] == "doc_x:0010"
+
+
+def test_load_corrupt_returns_none(tmp_path):
+    # 重建中途读到 / 文件损坏 → load 返回 None（上层退化为索引不可用，不 500）
+    recs = list(iter_nodes("doc_x", _tree()))
+    build_index(recs).save(tmp_path / "idx")
+    (tmp_path / "idx" / "meta.json").write_text("{ 截断的坏 JSON", encoding="utf-8")
+    assert BM25Index.load(tmp_path / "idx") is None

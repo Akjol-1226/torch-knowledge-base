@@ -9,6 +9,8 @@
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="vendor/mermaid.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -116,6 +118,9 @@
     .ref-node.active { background: rgba(139,121,212,.16); }
     .ref-card.active { outline: 2px solid #c9bdf0; outline-offset: 1px; }
     mark.cite-hl { background: #fff3b0; color: inherit; padding: 0 1px; border-radius: 2px; }
+    /* 流程图渲染失败/未加载的可见提示（不再静默）*/
+    .mermaid-notice { margin: 6px 0; padding: 6px 10px; font-size: 12px; color: #b45309;
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }
     /* 消息下方的引用来源（默认折叠，不强制展开；展开后完整不截断） */
     .msg-refs { margin-top: 8px; }
     .msg-refs-sum { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
@@ -721,9 +726,13 @@
       return html;
     }
 
-    // markdown → HTML：优先用已加载的 marked（支持标题/表格等），否则兜底
+    // markdown → HTML：优先用已加载的 marked（支持标题/表格等），否则兜底。
+    // 安全单点：marked 输出含原始 HTML（投毒 PDF/答案可注入 <img onerror> 等）→ 必经 DOMPurify 净化。
+    // DOMPurify 缺失时退回 _mdLite（会转义、丢表格但绝不执行脚本）。所有 markdown 渲染都走这里。
     function mdToHtml(text){
-      return window.marked ? marked.parse(String(text || '')) : _mdLite(text);
+      if(!window.marked) return _mdLite(text);
+      const raw = marked.parse(String(text || ''));
+      return window.DOMPurify ? DOMPurify.sanitize(raw) : _mdLite(text);
     }
 
     // 渲染聊天答案：先把 [[cite:handle]] 用占位符保护（避免被 marked 误解析），渲染后再换成可点上标
@@ -740,6 +749,61 @@
         return `<sup class="cite-badge cite-anchor" data-handle="${escapeHtml(handle)}" data-ref="${num}">${num}</sup>`;
       });
       return html;
+    }
+
+    // mermaid 一次性初始化：手动渲染（startOnLoad:false），strict 防注入
+    if(window.mermaid) mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:'default'});
+    let _mmdSeq = 0;
+    // 把已渲染 DOM 里的 ```mermaid 代码块（marked → <pre><code class="language-mermaid">）变成 SVG 图
+    function _mmdNotice(pre, text){
+      // 失败不再静默：在代码块上方插一条可见提示（带上原因），保留原始代码便于排查
+      if(pre.previousElementSibling && pre.previousElementSibling.classList.contains('mermaid-notice')) return;
+      const n = document.createElement('div');
+      n.className = 'mermaid-notice';
+      n.textContent = text;
+      pre.before(n);
+    }
+    async function renderMermaidIn(root){
+      if(!root) return;
+      const blocks = root.querySelectorAll('pre > code.language-mermaid');
+      if(!blocks.length) return;
+      if(!window.mermaid){
+        // 库没加载（CDN/缓存/旧页面）→ 给出可见提示，而不是默默显示成代码
+        blocks.forEach(code => _mmdNotice(code.parentElement, '⚠ 流程图组件未加载，请强刷页面（Ctrl+Shift+R）'));
+        return;
+      }
+      for(const code of blocks){
+        const def = code.textContent || '';        // textContent 还原被 marked 转义的 --> 等字符
+        const pre = code.parentElement;
+        try{
+          const {svg} = await mermaid.render('mmd-' + (_mmdSeq++), def);
+          if(!pre.isConnected) continue;           // await 期间用户已切走（新对话清空）→ 跳过
+          const box = document.createElement('div');
+          box.className = 'mermaid-figure my-3 flex justify-center overflow-x-auto';
+          box.innerHTML = svg;                     // mermaid strict 模式输出，可信
+          pre.replaceWith(box);
+        }catch(e){
+          // 渲染失败：可见提示 + 错误摘要，保留原代码块
+          _mmdNotice(pre, '⚠ 流程图渲染失败：' + String((e && e.message) || e).slice(0, 120));
+        }
+      }
+    }
+
+    // 流式渲染：边收边把累积文本渲染成 markdown（经 DOMPurify，安全）。
+    // 隐藏未闭合的 [[cite]] 标记（answer 时再渲染成可点上标）；mermaid 块此刻保持代码态（半截无效），
+    // 等 answer 事件统一 renderMermaidIn 成图。用 requestAnimationFrame 节流，避免每个 token 都重排。
+    function renderStreaming(ai, text){
+      const stripped = String(text || '').replace(/\[\[cite:[^\]]*\]*/g, '');
+      ai.body.classList.add('md');
+      ai.body.innerHTML = mdToHtml(stripped);
+    }
+    function scheduleStreamRender(ai, text){
+      ai._streamText = text;
+      if(ai._streamRAF) return;  // 已排队，等下一帧统一渲染最新文本
+      ai._streamRAF = requestAnimationFrame(() => {
+        ai._streamRAF = 0;
+        renderStreaming(ai, ai._streamText);
+      });
     }
 
     // 在已渲染的 DOM 里按问题关键词高亮：只动文本节点，不破坏 markdown 结构/HTML
@@ -1130,6 +1194,7 @@
             buildCiteIndex(refs);                 // 用本条来源建编号，使本条 [[cite]] 上标正确显示
             ai.body.classList.add('md');
             ai.body.innerHTML = renderMarkdown(m.content);
+            renderMermaidIn(ai.body);             // 历史会话里的 ```mermaid 块也渲染成图
             attachSourcesButton(ai, refs, '');    // 重建「数据来源」按钮（来源已随会话持久化）
             if(refs.length) lastRefs = refs;
             conversationHistory.push({role:'assistant', content:m.content});
@@ -1141,6 +1206,7 @@
     }
 
     async function sendChat(){
+      if(chatSend.disabled) return;   // 已有请求在飞（含 Enter 连按）→ 防并发双发
       const q = (chatInput.value||'').trim();
       if(!q) return;
       clearChatOnce();
@@ -1188,18 +1254,21 @@
               ai.stepsBody.appendChild(res);
             } else if(ev.type === 'chunk'){
               streamText += ev.text;
-              // 流式期间隐藏未完成的 [[cite:...]] 标记，避免原文闪现；answer 时统一渲染成上标
-              ai.body.textContent = streamText.replace(/\[\[cite:[^\]]*\]*/g, '');
+              // 流式边收边渲染 markdown（标题/表格/列表实时成形）；rAF 节流。
+              // 隐藏未闭合的 [[cite]] 标记；mermaid 块此刻仍是代码态，留到 answer 成图。
+              scheduleStreamRender(ai, streamText);
               ai.wrap.scrollIntoView({behavior:'smooth',block:'end'});
             } else if(ev.type === 'error'){
               ai.body.innerHTML = '<span class="text-red-500">⚠ ' + escapeHtml(ev.text||'服务出错') + '</span>';
             } else if(ev.type === 'answer'){
+              if(ai._streamRAF){ cancelAnimationFrame(ai._streamRAF); ai._streamRAF = 0; }  // 别让流式渲染覆盖终态
               const answerText = ev.text || streamText || '（无内容）';
               // 收集正文实际引用的 node（[[cite:handle]]）；右侧与本条面包屑只显示这些，与正文严格对应
               const refs = pickCitedSources(ev.sources, citedHandles(answerText));
               renderRefs(refs, q);                     // 右侧面板（建 citeIndex）
               ai.body.classList.add('md');
               ai.body.innerHTML = renderMarkdown(answerText);  // 正文上标据 citeIndex（marked 渲染标题/表格）
+              renderMermaidIn(ai.body);                // ```mermaid 块 → 流程图 SVG
               attachSourcesButton(ai, refs, q);        // 本条回答下方「数据来源」按钮（单独存住，不被新问题覆盖）
               if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已完成';
               conversationHistory.push({role:'user', content:q});
@@ -1438,7 +1507,7 @@
         if(d.detail) throw new Error(d.detail);
         document.getElementById('doc-modal-title').textContent = d.doc_name || '文档';
         document.getElementById('doc-modal-sub').textContent = (d.kb || 'default') + (d.has_pdf ? ' · 含原 PDF' : ' · 仅 Markdown（历史文档无原文件）');
-        mdBox.innerHTML = (window.marked ? marked.parse(d.md || '') : renderMarkdown(d.md || '（空）'));
+        mdBox.innerHTML = mdToHtml(d.md || '（空）');  // 经 DOMPurify 净化，防文档内嵌 HTML 注入
         const pdfTab = document.querySelector('[data-doc-tab="pdf"]');
         if(d.has_pdf){
           pdfTab.classList.remove('hidden');

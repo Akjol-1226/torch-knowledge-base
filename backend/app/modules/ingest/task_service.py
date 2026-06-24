@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.fsutil import write_json_atomic
 from app.core.logging import get_logger
 
 log = get_logger("ingest.task")
@@ -64,7 +65,7 @@ def create(filename: str, kb: str) -> dict:
         "created_at": _now(),
         "updated_at": _now(),
     }
-    _path(task_id).write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(_path(task_id), rec, indent=2)
     log.info("task_created", task_id=task_id, filename=filename, kb=kb)
     return rec
 
@@ -73,7 +74,11 @@ def get(task_id: str) -> dict | None:
     f = _path(task_id)
     if not f.exists():
         return None
-    return json.loads(f.read_text(encoding="utf-8"))
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        log.warning("task_unreadable", task_id=task_id)
+        return None
 
 
 def list_tasks() -> list[dict]:
@@ -97,10 +102,13 @@ def update(task_id: str, **fields) -> dict | None:
     f = _path(task_id)
     if not f.exists():
         return None
-    rec = json.loads(f.read_text(encoding="utf-8"))
+    try:
+        rec = json.loads(f.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
     rec.update(fields)
     rec["updated_at"] = _now()
-    f.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(f, rec, indent=2)
     return rec
 
 

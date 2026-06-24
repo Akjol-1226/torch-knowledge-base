@@ -67,22 +67,28 @@ def get_pdf_file(doc_id: str) -> Path | None:
 
 
 def delete_document(doc_id: str) -> dict:
-    """删除文档：删 md + 原 PDF + workspace json，重建树/索引/目录。"""
-    doc = _load(doc_id)
-    if doc is None:
-        return {"error": f"文档不存在: {doc_id}"}
-    md_path = Path(doc["path"])
-    if md_path.exists():
-        md_path.unlink()
-    Path(str(md_path) + ".pagemap.json").unlink(missing_ok=True)  # 一并删页码侧车，避免孤儿
-    Path(str(md_path) + ".ocr.json").unlink(missing_ok=True)      # 一并删 OCR 侧车
-    pdf = _pdf_path(doc)
-    if pdf.exists():
-        pdf.unlink()
-    _ws_path(doc_id).unlink(missing_ok=True)
-    log.info("document_deleted", doc_id=doc_id, doc_name=doc.get("doc_name"))
+    """删除文档：删 md + 原 PDF + workspace json，重建树/索引/目录。
 
-    from app.modules.ingest.tree_service import ingest_default
+    全程持 INDEX_LOCK：让"删文件 + 重建"原子，避免与并发入库交错（删一半被重建复活/丢文档）。
+    """
+    from app.modules.ingest.locks import INDEX_LOCK
 
-    tree = ingest_default()
-    return {"deleted": doc_id, "doc_name": doc.get("doc_name", ""), "tree": tree}
+    with INDEX_LOCK:
+        doc = _load(doc_id)
+        if doc is None:
+            return {"error": f"文档不存在: {doc_id}"}
+        md_path = Path(doc["path"])
+        if md_path.exists():
+            md_path.unlink()
+        Path(str(md_path) + ".pagemap.json").unlink(missing_ok=True)  # 一并删页码侧车，避免孤儿
+        Path(str(md_path) + ".ocr.json").unlink(missing_ok=True)      # 一并删 OCR 侧车
+        pdf = _pdf_path(doc)
+        if pdf.exists():
+            pdf.unlink()
+        _ws_path(doc_id).unlink(missing_ok=True)
+        log.info("document_deleted", doc_id=doc_id, doc_name=doc.get("doc_name"))
+
+        from app.modules.ingest.tree_service import ingest_default
+
+        tree = ingest_default()
+        return {"deleted": doc_id, "doc_name": doc.get("doc_name", ""), "tree": tree}

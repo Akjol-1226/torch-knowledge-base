@@ -6,10 +6,12 @@
 """
 
 import shutil
+import uuid
 from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.docparse import convert_pdf_to_markdown
+from app.core.fsutil import safe_name
 from app.core.logging import get_logger
 
 log = get_logger("ingest.docparse")
@@ -41,7 +43,9 @@ def ingest_pdf(
 
     settings = get_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    stem = Path(original_name or pdf_path).stem
+    # kb / stem 来自表单与上传文件名 → 收敛成安全名，防路径穿越（../ 等）写出 data/ 外
+    kb = safe_name(kb, default="default")
+    stem = safe_name(Path(original_name or pdf_path).stem)
 
     # 保留原 PDF 供查看（与 md 同 stem 关联：data/pdf/<kb>/<stem>.pdf）
     pdf_dir = settings.data_dir / "pdf" / kb
@@ -49,7 +53,8 @@ def ingest_pdf(
     shutil.copy(pdf_path, pdf_dir / f"{stem}.pdf")
 
     # 先解析到临时文件，再按 notsure 决定落待审区还是直接入库
-    tmp_md = settings.data_dir / f"_tmp_{stem}.md"
+    # 临时名带 uuid：同名文件并发上传不再共用同一 _tmp 路径而互相覆盖
+    tmp_md = settings.data_dir / f"_tmp_{stem}_{uuid.uuid4().hex[:8]}.md"
     pdf_to_markdown(pdf_path, tmp_md)  # 同时写 tmp_md.pagemap.json（行→PDF页 侧车）
     md_text = tmp_md.read_text(encoding="utf-8")
     tmp_pagemap = Path(str(tmp_md) + ".pagemap.json")

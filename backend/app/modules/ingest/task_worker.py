@@ -22,8 +22,9 @@ _semaphore = asyncio.Semaphore(task_service.DEFAULT_CONCURRENCY)
 async def run_ingest_task(task_id: str, tmp_path: str, original_name: str | None, kb: str) -> None:
     """后台执行一个入库任务：processing → needs_review/done，失败重试后 → failed。"""
     try:
-        async with _semaphore:
-            for attempt in range(1, task_service.MAX_RETRIES + 1):
+        for attempt in range(1, task_service.MAX_RETRIES + 1):
+            # 信号量只圈住"真正在跑"的解析；退避 sleep 放在锁外，避免重试期间空占并发槽堵队列
+            async with _semaphore:
                 task_service.update(
                     task_id, status=task_service.PROCESSING, progress=10, attempts=attempt
                 )
@@ -32,33 +33,34 @@ async def run_ingest_task(task_id: str, tmp_path: str, original_name: str | None
                 except Exception as e:  # noqa: BLE001 - 任务级兜底，错误进 task.error
                     err = f"{type(e).__name__}: {e}"
                     log.exception("task_attempt_failed", task_id=task_id, attempt=attempt)
-                    if attempt < task_service.MAX_RETRIES:
+                    if attempt >= task_service.MAX_RETRIES:
                         task_service.update(
-                            task_id,
-                            status=task_service.QUEUED,
-                            error=f"重试 {attempt}/{task_service.MAX_RETRIES}：{err}",
+                            task_id, status=task_service.FAILED, progress=0, error=err
                         )
-                        await asyncio.sleep(task_service.RETRY_BACKOFF[attempt - 1])
-                        continue
+                        return
                     task_service.update(
-                        task_id, status=task_service.FAILED, progress=0, error=err
+                        task_id,
+                        status=task_service.QUEUED,
+                        error=f"重试 {attempt}/{task_service.MAX_RETRIES}：{err}",
                     )
+                else:
+                    final = (
+                        task_service.NEEDS_REVIEW
+                        if result.get("status") == "needs_review"
+                        else task_service.DONE
+                    )
+                    task_service.update(
+                        task_id,
+                        status=final,
+                        progress=100,
+                        error=None,
+                        document=result.get("document"),
+                        notsure_count=result.get("notsure_count", 0),
+                    )
+                    log.info("task_finished", task_id=task_id, status=final)
                     return
-                final = (
-                    task_service.NEEDS_REVIEW
-                    if result.get("status") == "needs_review"
-                    else task_service.DONE
-                )
-                task_service.update(
-                    task_id,
-                    status=final,
-                    progress=100,
-                    error=None,
-                    document=result.get("document"),
-                    notsure_count=result.get("notsure_count", 0),
-                )
-                log.info("task_finished", task_id=task_id, status=final)
-                return
+            # 槽已释放，再退避等待（不占用并发额度）
+            await asyncio.sleep(task_service.RETRY_BACKOFF[attempt - 1])
     finally:
         try:
             os.unlink(tmp_path)

@@ -15,7 +15,7 @@ from app.modules.ingest import document_service, review_service, task_service
 from app.modules.ingest.schemas import UploadResponse
 from app.modules.ingest.service import IngestService
 from app.modules.ingest.task_worker import run_ingest_task
-from app.modules.ingest.tree_service import ingest_default
+from app.modules.ingest.tree_service import build_vectors_default, ingest_default
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -73,6 +73,15 @@ def build_tree() -> dict:
     return ingest_default()
 
 
+@router.post("/build-vectors")
+async def build_vectors() -> dict:
+    """补建向量索引（混合检索）：读已有 workspace 树编码，不重跑 VLM/不重建树。
+
+    给"代码升级前已入库"的老文档一次性补向量；新入库文档已自动建向量。丢线程池跑（阻塞 HTTP 调用）。
+    """
+    return await run_in_threadpool(build_vectors_default)
+
+
 @router.post("/upload-pdf")
 async def upload_pdf(
     background: BackgroundTasks,
@@ -83,12 +92,25 @@ async def upload_pdf(
 
     后台 worker 受并发信号量限制；解析/建树是阻塞 VLM/LLM 调用，丢线程池跑。
     临时文件由 worker 跑完后清理（不能用 with 自动删，否则后台还没读就没了）。
+    分块流式落盘 + 大小上限，避免大文件全量读进内存 OOM。
     """
-    content = await file.read()
+    max_bytes = get_settings().max_upload_mb * 1024 * 1024
     suffix = Path(file.filename or "upload.pdf").suffix or ".pdf"
     fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-    with os.fdopen(fd, "wb") as f:
-        f.write(content)
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件过大（上限 {get_settings().max_upload_mb}MB）",
+                    )
+                f.write(chunk)
+    except BaseException:
+        os.unlink(tmp_path)  # 失败不留孤儿临时文件
+        raise
     task = task_service.create(file.filename or "upload.pdf", kb)
     background.add_task(run_ingest_task, task["id"], tmp_path, file.filename, kb)
     return {"task_id": task["id"], "status": task["status"]}
@@ -99,7 +121,15 @@ async def upload_document(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db),
 ) -> UploadResponse:
-    content = await file.read()
+    max_bytes = get_settings().max_upload_mb * 1024 * 1024
+    buf = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        buf += chunk
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=413, detail=f"文件过大（上限 {get_settings().max_upload_mb}MB）"
+            )
+    content = bytes(buf)
     service = IngestService(session)
     return await service.upload_document(
         filename=file.filename or "unknown", content=content

@@ -1,3 +1,4 @@
+import threading
 from contextvars import ContextVar
 
 from langchain_core.tools import tool
@@ -11,28 +12,44 @@ current_kbs: ContextVar[list | None] = ContextVar("current_kbs", default=None)
 
 _store = None
 _store_sig = None
+_store_lock = threading.Lock()  # 防多线程（工具跑在线程池）并发重复重建 / 撕裂赋值
 
 
 def _catalog_sig():
-    """用 catalog 文件 mtime 作为索引版本签名——入库/审核/删除重建后会重写它。"""
-    f = get_settings().data_dir / "catalog" / "document_catalog.json"
-    return f.stat().st_mtime if f.exists() else None
+    """索引版本签名：catalog + 向量索引元数据的 mtime。
+
+    catalog 在入库/审核/删除重建后会重写；vec_meta 在 /build-vectors 补建向量后会重写
+    （此时 catalog 不变）——两者都纳入签名，确保补建向量后热服务也能重载到新索引。
+    """
+    d = get_settings().data_dir
+    cat = d / "catalog" / "document_catalog.json"
+    vec = d / "indexes" / "vec_meta.json"
+    return (
+        cat.stat().st_mtime if cat.exists() else None,
+        vec.stat().st_mtime if vec.exists() else None,
+    )
 
 
 def get_store() -> TreeStore:
-    """惰性单例；catalog 变更（入库/删除/审核重建）时自动重载，避免检索到旧树。"""
+    """惰性单例；catalog/向量索引变更时自动重载，避免检索到旧树。加锁防并发重复重建。"""
     global _store, _store_sig
     sig = _catalog_sig()
-    if _store is None or sig != _store_sig:
-        _store = TreeStore(get_settings().data_dir)
-        _store_sig = sig
+    if _store is not None and sig == _store_sig:
+        return _store
+    with _store_lock:
+        # 双检：拿锁期间可能已被其他线程重建
+        if _store is None or sig != _store_sig:
+            store = TreeStore(get_settings().data_dir)  # 先建好再发布，避免读到半初始化对象
+            _store = store
+            _store_sig = sig
     return _store
 
 
 def set_store(ts: TreeStore) -> None:
     global _store, _store_sig
-    _store = ts
-    _store_sig = _catalog_sig()  # 锁定当前签名，避免被 mtime 检测覆盖（测试注入用）
+    with _store_lock:
+        _store = ts
+        _store_sig = _catalog_sig()  # 锁定当前签名，避免被 mtime 检测覆盖（测试注入用）
 
 
 @tool

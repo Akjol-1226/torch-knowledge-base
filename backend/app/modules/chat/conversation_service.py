@@ -6,13 +6,25 @@
 """
 
 import json
+import threading
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.fsutil import write_json_atomic
 from app.core.logging import get_logger
 
 log = get_logger("chat.conversation")
+
+# 每会话一把锁：串行化同一会话的读-改-写（append/rename），避免并发丢轮次/写撕裂。
+_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+_locks_guard = threading.Lock()
+
+
+def _lock_for(cid: str) -> threading.Lock:
+    with _locks_guard:
+        return _locks[cid]
 
 
 def _dir() -> Path:
@@ -58,7 +70,11 @@ def get_conversation(cid: str) -> dict | None:
     f = _dir() / f"{_safe_id(cid)}.json"
     if not f.exists():
         return None
-    return json.loads(f.read_text(encoding="utf-8"))
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        log.warning("conv_unreadable", cid=cid)
+        return None
 
 
 def append_turn(
@@ -75,22 +91,28 @@ def append_turn(
     """
     d = _dir()
     d.mkdir(parents=True, exist_ok=True)
-    f = d / f"{_safe_id(cid)}.json"
-    if f.exists():
-        rec = json.loads(f.read_text(encoding="utf-8"))
-    else:
-        rec = {
-            "id": cid,
-            "title": (title_hint or user_msg or "新对话").strip()[:40] or "新对话",
-            "created_at": _now(),
-            "messages": [],
-        }
-    rec["messages"].append({"role": "user", "content": user_msg, "ts": _now()})
-    rec["messages"].append(
-        {"role": "assistant", "content": assistant_msg, "ts": _now(), "sources": sources or []}
-    )
-    rec["updated_at"] = _now()
-    f.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    sid = _safe_id(cid)
+    f = d / f"{sid}.json"
+    with _lock_for(sid):  # 同会话读-改-写串行，防并发丢轮次
+        rec = None
+        if f.exists():
+            try:
+                rec = json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                log.warning("conv_unreadable_recreate", cid=cid)
+        if rec is None:
+            rec = {
+                "id": cid,
+                "title": (title_hint or user_msg or "新对话").strip()[:40] or "新对话",
+                "created_at": _now(),
+                "messages": [],
+            }
+        rec["messages"].append({"role": "user", "content": user_msg, "ts": _now()})
+        rec["messages"].append(
+            {"role": "assistant", "content": assistant_msg, "ts": _now(), "sources": sources or []}
+        )
+        rec["updated_at"] = _now()
+        write_json_atomic(f, rec, indent=2)
     log.info("conv_append", cid=rec["id"], turns=len(rec["messages"]) // 2)
     return rec
 
@@ -104,11 +126,17 @@ def delete_conversation(cid: str) -> bool:
 
 
 def rename_conversation(cid: str, title: str) -> bool:
-    f = _dir() / f"{_safe_id(cid)}.json"
+    sid = _safe_id(cid)
+    f = _dir() / f"{sid}.json"
     if not f.exists():
         return False
-    rec = json.loads(f.read_text(encoding="utf-8"))
-    rec["title"] = (title or "").strip()[:80] or rec.get("title") or "新对话"
-    rec["updated_at"] = _now()
-    f.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _lock_for(sid):
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            log.warning("conv_unreadable", cid=cid)
+            return False
+        rec["title"] = (title or "").strip()[:80] or rec.get("title") or "新对话"
+        rec["updated_at"] = _now()
+        write_json_atomic(f, rec, indent=2)
     return True
