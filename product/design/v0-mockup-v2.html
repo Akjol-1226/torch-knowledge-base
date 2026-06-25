@@ -122,7 +122,7 @@
     .mermaid-notice { margin: 6px 0; padding: 6px 10px; font-size: 12px; color: #b45309;
       background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }
     /* 消息下方的引用来源（默认折叠，不强制展开；展开后完整不截断） */
-    .msg-refs { margin-top: 8px; }
+    .msg-refs { margin-top: 0; }   /* 现在位于正文下方的 .ai-foot 行内，与工具步骤并排 */
     .msg-refs-sum { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
       font-size: 11px; color: #8478a8; list-style: none; user-select: none; padding: 2px 0; }
     .msg-refs-sum::-webkit-details-marker { display: none; }
@@ -141,6 +141,17 @@
     .msg-src-btn { font-size: 12px; color: #6d5bd0; background: #f1eefc; border: 1px solid #e4dcf7;
       border-radius: 999px; padding: 3px 12px; cursor: pointer; transition: background .15s ease; }
     .msg-src-btn:hover { background: #e4dcf7; }
+    /* 工具步骤 chip：与「数据来源」按钮同尺寸的药丸（灰色区分，带旋转小三角） */
+    .ai-steps-sum { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64748b;
+      background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 999px; padding: 3px 12px;
+      cursor: pointer; transition: background .15s ease; list-style: none; white-space: nowrap; }
+    .ai-steps-sum::-webkit-details-marker { display: none; }
+    .ai-steps-sum::before { content: '▸'; font-size: 10px; display: inline-block; transition: transform .15s ease; }
+    .ai-steps[open] .ai-steps-sum::before { transform: rotate(90deg); }
+    .ai-steps-sum:hover { background: #e7ebf0; }
+    /* 发送按钮的「停止」态：红色 */
+    #chat-send.is-stop { background: #ef4444 !important; background-image: none !important; }
+    #chat-send.is-stop:hover { background: #dc2626 !important; }
     /* 右侧来源条目展开的上下文 */
     .ref-node-head { /* 行容器，承载徽章+meta+snippet+展开 */ }
     .ref-expand { white-space: nowrap; color: #b9b0d6; font-size: 11px; }
@@ -235,6 +246,25 @@
       border: 1px solid rgba(255,255,255,0.95);
       box-shadow: 0 10px 30px rgba(31,38,135,0.12);
     }
+    /* 文档结构树弹窗 —— 极简编号目录 */
+    .tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; transition: background .12s; }
+    .tree-row.has-kids { cursor: pointer; }
+    .tree-row:hover { background: rgba(139,121,212,.08); }
+    .tree-num { flex-shrink: 0; width: 22px; text-align: right; font-size: 11px; color: #b8b2cc; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tree-caret { display: inline-block; width: 12px; flex-shrink: 0; color: #8b79d4; font-size: 10px; transition: transform .12s; text-align: center; }
+    .tree-node:not(.tree-collapsed) > .tree-row .tree-caret { transform: rotate(90deg); }
+    .tree-caret.empty { color: transparent; }
+    .tree-leaf-ico { flex-shrink: 0; font-size: 11px; opacity: .55; }
+    .tree-title { line-height: 22px; word-break: break-word; }
+    .tree-row.chapter > .tree-title { font-size: 13.5px; font-weight: 600; color: #1e293b; }
+    .tree-row.leaf > .tree-title { font-size: 12px; color: #64748b; }
+    .tree-meta { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; padding-left: 8px; }
+    .tree-win { font-size: 10px; color: #8b79d4; background: rgba(139,121,212,.1); padding: 1px 7px; border-radius: 999px; }
+    .tree-page { font-size: 10px; color: #94a3b8; background: rgba(28,24,56,.05); padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+    .tree-children { margin-left: 17px; border-left: 1px dashed rgba(28,24,56,.12); padding-left: 8px; }
+    .tree-collapsed > .tree-children { display: none; }
+    /* 拖拽上传：文件拖到区域上方时高亮 */
+    #upload-drop.drop-active { background: rgba(139,121,212,.12); border-color: #8b79d4; box-shadow: 0 0 0 3px rgba(139,121,212,.15) inset; }
     /* 文档查看弹窗：marked 渲染的 md（含 HTML 表格）基础排版 */
     #doc-view-md h1, #doc-view-md h2, #doc-view-md h3, #doc-view-md h4 { font-weight: 600; color: #1e293b; margin: 14px 0 6px; }
     #doc-view-md h1 { font-size: 18px; } #doc-view-md h2 { font-size: 16px; } #doc-view-md h3 { font-size: 14px; }
@@ -427,15 +457,15 @@
           </div>
 
           <!-- 上传结果提示 -->
-          <input type="file" id="upload-input" accept=".pdf" class="hidden" />
+          <input type="file" id="upload-input" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.rtf,.odt,.csv" class="hidden" />
           <div id="upload-result" class="hidden mb-4 glass-soft rounded-2xl p-4 text-sm"></div>
           <!-- 拖拽区 -->
           <div id="upload-drop" class="glass-soft rounded-3xl p-12 border-2 border-dashed border-pastel-purple/60 text-center mb-6 hover:bg-white/70 transition cursor-pointer">
             <div class="w-16 h-16 rounded-2xl tile-purple mx-auto mb-4 flex items-center justify-center">
               <svg class="w-8 h-8 text-accent-ink" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
             </div>
-            <p class="text-base font-semibold text-slate-700 mb-1">拖拽 PDF 到这里，或<span class="text-pastel-purple underline underline-offset-4">点击选择</span></p>
-            <p class="text-xs text-slate-500">仅支持 PDF · 选择后立即上传并由 VLM 逐页解析（大文件需数分钟）</p>
+            <p class="text-base font-semibold text-slate-700 mb-1">拖拽文档到这里，或<span class="text-pastel-purple underline underline-offset-4">点击选择</span></p>
+            <p class="text-xs text-slate-500">支持 PDF / Word / Excel / PPT / txt 等 · 非 PDF 会先自动转成 PDF · 上传后由 VLM 逐页解析（大文件需数分钟）</p>
           </div>
         </section>
       </section>
@@ -594,6 +624,27 @@
         <div id="doc-view-md" class="h-full overflow-y-auto custom-scrollbar px-8 py-6 text-sm text-slate-700 leading-relaxed"></div>
         <iframe id="doc-view-pdf" class="w-full h-full hidden" title="原文 PDF"></iframe>
       </div>
+    </div>
+  </div>
+
+  <!-- 文档结构弹窗：PageIndex 章节树（可折叠层级 + 页码 + 摘要） -->
+  <div id="tree-modal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-slate-900/30 backdrop-blur-[2px]" data-tree-close></div>
+    <div class="absolute inset-4 md:inset-10 surface-modal rounded-3xl flex flex-col overflow-hidden">
+      <div class="px-6 py-4 border-b border-[rgba(28,24,56,0.07)] flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <h2 id="tree-modal-title" class="text-base font-semibold text-slate-800 truncate">文档结构</h2>
+          <p id="tree-modal-sub" class="text-[11px] text-slate-400 mt-0.5"></p>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button id="tree-expand-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">展开全部</button>
+          <button id="tree-collapse-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">收起全部</button>
+          <button class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-[rgba(28,24,56,0.05)] flex items-center justify-center transition" data-tree-close title="关闭">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="tree-view" class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 bg-white/30 text-sm"></div>
     </div>
   </div>
 
@@ -855,14 +906,13 @@
           <span class="text-accent-ink text-sm font-semibold leading-none">知</span>
         </div>
         <div class="max-w-[75%]">
-          <details class="ai-steps mb-3 hidden">
-            <summary class="glass-soft rounded-2xl px-4 py-2.5 inline-flex items-center gap-2 text-xs text-slate-500 cursor-pointer hover:bg-white/80 transition list-none">
-              <svg class="w-3.5 h-3.5 tool-arrow transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 5l7 7-7 7"/></svg>
-              <span class="ai-steps-label">检索中…</span>
-            </summary>
-            <div class="ai-steps-body glass-soft rounded-2xl p-4 mt-2 text-[11px] font-mono text-slate-600 leading-relaxed space-y-1"></div>
-          </details>
           <div class="ai-body bg-white/55 border border-white/80 rounded-2xl rounded-tl-md px-5 py-4 text-sm text-slate-700 leading-relaxed shadow-sm"><span class="text-slate-400">正在思考…</span></div>
+          <div class="ai-foot flex items-start gap-2 flex-wrap mt-2">
+            <details class="ai-steps hidden">
+              <summary class="ai-steps-sum"><span class="ai-steps-label">检索中…</span></summary>
+              <div class="ai-steps-body glass-soft rounded-2xl p-4 mt-2 text-[11px] font-mono text-slate-600 leading-relaxed space-y-1"></div>
+            </details>
+          </div>
           <div class="text-[10px] text-slate-400 tracking-widest mt-2">${nowTime()}</div>
         </div>`;
       chatStream.appendChild(el);
@@ -873,11 +923,8 @@
         stepsLabel: el.querySelector('.ai-steps-label'),
         stepsBody: el.querySelector('.ai-steps-body'),
         body: el.querySelector('.ai-body'),
+        foot: el.querySelector('.ai-foot'),
       };
-      shell.steps.addEventListener('toggle', () => {
-        const a = shell.steps.querySelector('.tool-arrow');
-        if(a) a.style.transform = shell.steps.open ? 'rotate(90deg)' : 'rotate(0deg)';
-      });
       return shell;
     }
 
@@ -958,7 +1005,8 @@
       if(!box){
         box = document.createElement('div');
         box.className = 'msg-refs';
-        shell.body.insertAdjacentElement('afterend', box);
+        // 放进正文下方的 footer 行、置于最左：数据来源在左、工具步骤在右，并排显示
+        (shell.foot || shell.body).insertAdjacentElement(shell.foot ? 'afterbegin' : 'afterend', box);
       }
       box.innerHTML = '<button class="msg-src-btn" data-mid="' + mid + '">📎 数据来源 · ' + count + '</button>';
     }
@@ -1205,24 +1253,36 @@
       }catch{ /* 忽略 */ }
     }
 
+    let chatAbort = null;   // 进行中请求的 AbortController；null = 空闲
+    function setSendBtn(stopping){
+      if(!chatSend) return;
+      chatSend.textContent = stopping ? '停止' : '发送';
+      chatSend.classList.toggle('is-stop', stopping);
+    }
+    function onSendClick(){
+      if(chatAbort){ chatAbort.abort(); return; }   // 流式进行中 → 点击=停止
+      sendChat();
+    }
     async function sendChat(){
-      if(chatSend.disabled) return;   // 已有请求在飞（含 Enter 连按）→ 防并发双发
+      if(chatAbort) return;            // 已有请求在飞（含 Enter 连按）→ 防并发双发
       const q = (chatInput.value||'').trim();
       if(!q) return;
       clearChatOnce();
       chatInput.value = ''; chatInput.style.height = 'auto';
-      chatSend.disabled = true;
-      addUserMsg(q);
-      lastQuery = q;  // 供右侧 snippet 关键词高亮
-      const ai = createAiShell();
-      let streamText = '', steps = [];
+      chatAbort = new AbortController();
+      setSendBtn(true);                // 发送 → 停止
+      let ai, streamText = '', steps = [];
       try{
+        addUserMsg(q);
+        lastQuery = q;  // 供右侧 snippet 关键词高亮
+        ai = createAiShell();
         const kbSel = document.getElementById('chat-kb');
         const kbs = kbSel && kbSel.value ? [kbSel.value] : null;  // 检索范围（null=全库）
         const res = await fetch(API_BASE + '/chat/stream', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({message: q, history: conversationHistory, kbs, conversation_id: currentConvId}),
+          signal: chatAbort.signal,
         });
         if(!res.ok) throw new Error('HTTP ' + res.status);
         const reader = res.body.getReader();
@@ -1279,14 +1339,28 @@
           }
         }
       } catch(err){
-        ai.body.innerHTML = '<span class="text-red-500">⚠ ' + escapeHtml(err.message||'请求失败，请确认后端已启动') + '</span>';
+        if(err && err.name === 'AbortError'){
+          // 用户中断：保留已流式出来的部分、标「已中断」，不报错、不存历史、无数据来源
+          if(ai){
+            if(ai._streamRAF){ cancelAnimationFrame(ai._streamRAF); ai._streamRAF = 0; }
+            const stripped = streamText.replace(/\[\[cite:[^\]]*\]*/g, '');
+            ai.body.classList.add('md');
+            ai.body.innerHTML = (stripped.trim() ? mdToHtml(stripped) : '<span class="text-slate-400">（已停止）</span>')
+              + '<div class="mt-2 text-[11px] text-amber-600">⏹ 已中断</div>';
+            if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已中断';
+          }
+        } else {
+          const msg = '<span class="text-red-500">⚠ ' + escapeHtml((err && err.message)||'请求失败，请确认后端已启动') + '</span>';
+          if(ai) ai.body.innerHTML = msg;   // ai 可能在创建前就抛错 → 防御性判空
+        }
       } finally {
-        chatSend.disabled = false;
+        chatAbort = null;
+        setSendBtn(false);   // 停止 → 发送（任何结束路径都复位按钮）
         chatInput.focus();
       }
     }
 
-    if(chatSend) chatSend.addEventListener('click', sendChat);
+    if(chatSend) chatSend.addEventListener('click', onSendClick);
     // 引用联动：点正文上标 / 右侧来源条目 → 双向定位高亮
     document.addEventListener('click', e => {
       const srcBtn = e.target.closest('.msg-src-btn');
@@ -1323,27 +1397,46 @@
     const uploadDrop = document.getElementById('upload-drop');
     const uploadInput = document.getElementById('upload-input');
     const uploadResult = document.getElementById('upload-result');
+    // 允许的扩展名（与后端 SUPPORTED_UPLOAD_EXTS 一致）；拖拽绕过 accept，故客户端先校验
+    const UPLOAD_EXTS = ['.pdf','.docx','.doc','.xlsx','.xls','.pptx','.ppt','.txt','.rtf','.odt','.csv'];
+    async function uploadFile(file){
+      if(!file) return;
+      const dot = file.name.lastIndexOf('.');
+      const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : '';
+      uploadResult.classList.remove('hidden');
+      if(!UPLOAD_EXTS.includes(ext)){
+        uploadResult.innerHTML = `<span class="text-red-500">不支持的格式 <strong>${escapeHtml(ext || '(无扩展名)')}</strong>。支持：${UPLOAD_EXTS.join(' / ')}</span>`;
+        return;
+      }
+      uploadResult.innerHTML = `<span class="text-slate-500">正在上传 <strong>${escapeHtml(file.name)}</strong>…</span>`;
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kb', document.getElementById('upload-kb')?.value || 'default');
+      try{
+        const res = await fetch(API_BASE + '/ingest/upload-pdf', {method:'POST', body:fd});
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.detail || ('HTTP ' + res.status));
+        // 异步：已入队，后台 VLM 逐页解析，去任务队列看进度（不再干等）
+        uploadResult.innerHTML = `<span class="text-emerald-700">已加入队列（任务 ${escapeHtml(d.task_id || '')}），后台解析中。 <a class="text-pastel-purple underline cursor-pointer" data-goto-queue>去任务队列看进度 →</a></span>`;
+        uploadResult.querySelector('[data-goto-queue]')?.addEventListener('click', () => switchPage('kb-queue'));
+      }catch(err){
+        uploadResult.innerHTML = `<span class="text-red-500">上传失败：${escapeHtml(err.message)}（确认后端已启动）</span>`;
+      }
+    }
     if(uploadDrop && uploadInput){
       uploadDrop.addEventListener('click', () => uploadInput.click());
-      uploadInput.addEventListener('change', async () => {
-        const file = uploadInput.files[0];
-        if(!file) return;
-        uploadResult.classList.remove('hidden');
-        uploadResult.innerHTML = `<span class="text-slate-500">正在上传 <strong>${escapeHtml(file.name)}</strong>…</span>`;
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('kb', document.getElementById('upload-kb')?.value || 'default');
-        try{
-          const res = await fetch(API_BASE + '/ingest/upload-pdf', {method:'POST', body:fd});
-          const d = await res.json();
-          if(!res.ok) throw new Error(d.detail || ('HTTP ' + res.status));
-          // 异步：已入队，后台 VLM 逐页解析，去任务队列看进度（不再干等）
-          uploadResult.innerHTML = `<span class="text-emerald-700">已加入队列（任务 ${escapeHtml(d.task_id || '')}），后台解析中。 <a class="text-pastel-purple underline cursor-pointer" data-goto-queue>去任务队列看进度 →</a></span>`;
-          uploadResult.querySelector('[data-goto-queue]')?.addEventListener('click', () => switchPage('kb-queue'));
-        }catch(err){
-          uploadResult.innerHTML = `<span class="text-red-500">上传失败：${escapeHtml(err.message)}（确认后端已启动）</span>`;
-        }
-        uploadInput.value = '';
+      uploadInput.addEventListener('change', () => { uploadFile(uploadInput.files[0]); uploadInput.value = ''; });
+      // 拖拽上传：dragover 必须 preventDefault 才允许 drop；进入/离开切换高亮
+      ['dragenter','dragover'].forEach(ev => uploadDrop.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation(); uploadDrop.classList.add('drop-active');
+      }));
+      ['dragleave','dragend'].forEach(ev => uploadDrop.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation(); uploadDrop.classList.remove('drop-active');
+      }));
+      uploadDrop.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation(); uploadDrop.classList.remove('drop-active');
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(f) uploadFile(f);
       });
     }
 
@@ -1463,12 +1556,14 @@
         });
         html += '</div>';
         if(d.doc_list && d.doc_list.length){
-          html += '<div class="pt-2"><p class="text-[11px] tracking-widest uppercase text-slate-500 font-bold mb-3">已入库文档</p>';
+          // 横跨整行（之前被塞进 3 列网格的单格里 → 按钮被挤到溢出，需缩放才看得全）
+          html += '<div class="pt-2 md:col-span-2 xl:col-span-3"><p class="text-[11px] tracking-widest uppercase text-slate-500 font-bold mb-3">已入库文档</p>';
           d.doc_list.forEach(doc => {
-            html += `<div class="glass-soft rounded-2xl px-4 py-3 mb-2 flex items-center justify-between gap-3">
-              <div class="min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${escapeHtml(doc.doc_name)}</p><p class="text-[11px] text-slate-400 mt-0.5 truncate">${escapeHtml(doc.doc_description || '')}</p></div>
+            html += `<div class="glass-soft rounded-2xl px-4 py-3 mb-2 flex items-center justify-between gap-3 flex-wrap">
+              <div class="min-w-0 flex-1"><p class="text-sm font-medium text-slate-800 truncate">${escapeHtml(doc.doc_name)}</p><p class="text-[11px] text-slate-400 mt-0.5 truncate">${escapeHtml(doc.doc_description || '')}</p></div>
               <div class="flex items-center gap-2 flex-shrink-0">
                 <span class="chip chip-purple">${escapeHtml(doc.kb || 'default')}</span>
+                <button class="btn-ghost !py-1.5 !px-3 text-xs" data-doc-tree="${escapeHtml(doc.doc_id)}">结构</button>
                 <button class="btn-ghost !py-1.5 !px-3 text-xs" data-doc-view="${escapeHtml(doc.doc_id)}">查看</button>
                 <button class="btn-danger-ghost !py-1.5 !px-3 text-xs" data-doc-del="${escapeHtml(doc.doc_id)}" data-doc-name="${escapeHtml(doc.doc_name)}">删除</button>
               </div></div>`;
@@ -1476,6 +1571,7 @@
           html += '</div>';
         }
         grid.innerHTML = html;
+        grid.querySelectorAll('[data-doc-tree]').forEach(b => b.addEventListener('click', () => openDocTree(b.dataset.docTree)));
         grid.querySelectorAll('[data-doc-view]').forEach(b => b.addEventListener('click', () => openDocument(b.dataset.docView)));
         grid.querySelectorAll('[data-doc-del]').forEach(b => b.addEventListener('click', () => deleteDocument(b.dataset.docDel, b.dataset.docName)));
       }catch(err){ grid.innerHTML = `<p class="text-sm text-red-500 py-8 text-center">加载失败：${escapeHtml(err.message)}（确认后端已启动）</p>`; }
@@ -1530,6 +1626,70 @@
     if(docModal){
       docModal.querySelectorAll('[data-doc-close]').forEach(el => el.addEventListener('click', closeDocModal));
       document.querySelectorAll('#doc-tabs .doc-tab').forEach(b => b.addEventListener('click', () => setDocTab(b.dataset.docTab)));
+    }
+
+    // ── 文档结构树（接 /ingest/document/{id}/tree）──
+    const treeModal = document.getElementById('tree-modal');
+    function closeTreeModal(){ if(treeModal) treeModal.classList.add('hidden'); }
+    function countTreeNodes(nodes){ let c = 0; (nodes || []).forEach(n => { c += 1 + countTreeNodes(n.children); }); return c; }
+    // 递归建可折叠 DOM。depth=0 是章节（带序号、加粗）；其下是附表/子项（📎、淡化）。
+    // 默认全部收起 → 初始就是干净的章节清单；摘要走 row 的 title 悬停浮层。
+    function makeTreeNode(node, depth, num){
+      const wrap = document.createElement('div');
+      wrap.className = 'tree-node';
+      const kids = node.children || [];
+      const hasKids = kids.length > 0;
+      const isChapter = depth === 0;
+      const row = document.createElement('div');
+      row.className = 'tree-row ' + (isChapter ? 'chapter' : 'leaf') + (hasKids ? ' has-kids' : '');
+      if(node.summary) row.title = node.summary;   // 悬停显示该章节/节点摘要
+      const numHtml = isChapter ? `<span class="tree-num">${num}</span>` : '';
+      const caretHtml = `<span class="tree-caret${hasKids ? '' : ' empty'}">${hasKids ? '▸' : ''}</span>`;
+      const iconHtml = (!isChapter && !hasKids) ? '<span class="tree-leaf-ico">📎</span>' : '';
+      const win = (node.windows > 1) ? `<span class="tree-win">${node.windows} 段</span>` : '';
+      const page = (node.page != null) ? `<span class="tree-page">P${node.page}</span>` : '';
+      row.innerHTML = numHtml + caretHtml + iconHtml
+        + `<span class="tree-title">${escapeHtml(node.title || '（无标题）')}</span>`
+        + `<span class="tree-meta">${win}${page}</span>`;
+      wrap.appendChild(row);
+      if(hasKids){
+        const cbox = document.createElement('div');
+        cbox.className = 'tree-children';
+        kids.forEach(c => cbox.appendChild(makeTreeNode(c, depth + 1)));
+        wrap.appendChild(cbox);
+        wrap.classList.add('tree-collapsed');     // 默认收起
+        row.addEventListener('click', () => wrap.classList.toggle('tree-collapsed'));
+      }
+      return wrap;
+    }
+    async function openDocTree(docId){
+      if(!treeModal) return;
+      treeModal.classList.remove('hidden');
+      const box = document.getElementById('tree-view');
+      box.innerHTML = '<p class="text-slate-400">加载中…</p>';
+      document.getElementById('tree-modal-title').textContent = '文档结构';
+      document.getElementById('tree-modal-sub').textContent = '';
+      try{
+        const d = await (await fetch(API_BASE + '/ingest/document/' + encodeURIComponent(docId) + '/tree')).json();
+        if(d.detail) throw new Error(d.detail);
+        // 去掉与文档名重复的单一根节点：直接把它的章节作为顶层展示，少一层多余缩进
+        let roots = d.nodes || [];
+        if(roots.length === 1 && (roots[0].title || '').trim() === (d.doc_name || '').trim()){
+          roots = roots[0].children || [];
+        }
+        document.getElementById('tree-modal-title').textContent = d.doc_name || '文档结构';
+        document.getElementById('tree-modal-sub').textContent = (d.kb || 'default') + ' · ' + roots.length + ' 章 · ' + countTreeNodes(roots) + ' 节点';
+        box.innerHTML = '';
+        if(!roots.length){ box.innerHTML = '<p class="text-slate-400 py-8 text-center">该文档无结构节点</p>'; return; }
+        roots.forEach((n, i) => box.appendChild(makeTreeNode(n, 0, i + 1)));
+      }catch(err){ box.innerHTML = '<p class="text-red-500">加载失败：' + escapeHtml(err.message) + '</p>'; }
+    }
+    if(treeModal){
+      treeModal.querySelectorAll('[data-tree-close]').forEach(el => el.addEventListener('click', closeTreeModal));
+      document.getElementById('tree-expand-all').addEventListener('click',
+        () => document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.remove('tree-collapsed')));
+      document.getElementById('tree-collapse-all').addEventListener('click',
+        () => document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.add('tree-collapsed')));
     }
 
     // ── 对话检索范围下拉（接 /ingest/stats 的 kbs）──
