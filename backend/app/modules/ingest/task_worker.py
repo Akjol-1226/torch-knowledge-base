@@ -11,12 +11,30 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.logging import get_logger
 from app.modules.ingest import task_service
+from app.modules.ingest.doc_convert import needs_conversion, to_pdf
 from app.modules.ingest.docparse_service import ingest_pdf
 
 log = get_logger("ingest.worker")
 
 # 全局并发闸门：同时在跑的解析任务数 ≤ DEFAULT_CONCURRENCY
 _semaphore = asyncio.Semaphore(task_service.DEFAULT_CONCURRENCY)
+
+
+def _convert_and_ingest(tmp_path: str, original_name: str | None, kb: str) -> dict:
+    """非 PDF 先转 PDF 再入库；清理转换产生的临时 PDF。同步阻塞，丢线程池跑。
+
+    转换+入库一起被 worker 的重试循环覆盖，故 Gotenberg 临时不可用也能重试。
+    """
+    pdf_path = tmp_path
+    converted = None
+    if needs_conversion(original_name or tmp_path):
+        converted = to_pdf(tmp_path, original_name)
+        pdf_path = str(converted)
+    try:
+        return ingest_pdf(pdf_path, original_name, kb)
+    finally:
+        if converted is not None:
+            converted.unlink(missing_ok=True)
 
 
 async def run_ingest_task(task_id: str, tmp_path: str, original_name: str | None, kb: str) -> None:
@@ -29,7 +47,9 @@ async def run_ingest_task(task_id: str, tmp_path: str, original_name: str | None
                     task_id, status=task_service.PROCESSING, progress=10, attempts=attempt
                 )
                 try:
-                    result = await run_in_threadpool(ingest_pdf, tmp_path, original_name, kb)
+                    result = await run_in_threadpool(
+                        _convert_and_ingest, tmp_path, original_name, kb
+                    )
                 except Exception as e:  # noqa: BLE001 - 任务级兜底，错误进 task.error
                     err = f"{type(e).__name__}: {e}"
                     log.exception("task_attempt_failed", task_id=task_id, attempt=attempt)

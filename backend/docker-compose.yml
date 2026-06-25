@@ -1,4 +1,5 @@
-# v0 骨架阶段：留壳供 v1 启用。SQLite 单机不需要外部服务。
+# v0 骨架阶段：SQLite 单机不需要外部服务。
+# gotenberg：多格式（docx/xlsx/pptx/txt…）→ PDF 转换服务（封装 LibreOffice + 中文字体）。
 # v1+ 加入 Postgres / Redis 时在此扩展。
 services:
   api:
@@ -7,5 +8,17 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # 容器内访问转换服务用服务名；本地裸跑 dev 时 .env 里设 http://localhost:3000
+      - GOTENBERG_URL=http://gotenberg:3000
     volumes:
       - ./torch_kb.db:/app/torch_kb.db
+    depends_on:
+      - gotenberg
+
+  gotenberg:
+    build:
+      context: ./docker/gotenberg   # 自定义镜像：Gotenberg + 中文字体
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # 本地 dev 也能直接 POST 调试

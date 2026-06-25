@@ -12,6 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.modules.ingest import document_service, review_service, task_service
+from app.modules.ingest.doc_convert import SUPPORTED_UPLOAD_EXTS
 from app.modules.ingest.schemas import UploadResponse
 from app.modules.ingest.service import IngestService
 from app.modules.ingest.task_worker import run_ingest_task
@@ -88,14 +89,19 @@ async def upload_pdf(
     file: UploadFile = File(...),
     kb: str = Form("default"),
 ) -> dict:
-    """PDF 直传 → 入异步队列：建任务(queued) + 后台解析建树，立即返回 task_id。
+    """多格式直传（PDF / docx / xlsx / pptx / txt …）→ 入异步队列，立即返回 task_id。
 
-    后台 worker 受并发信号量限制；解析/建树是阻塞 VLM/LLM 调用，丢线程池跑。
-    临时文件由 worker 跑完后清理（不能用 with 自动删，否则后台还没读就没了）。
+    非 PDF 由 worker 先经 Gotenberg 转 PDF，再走现有 PDF 解析/建树管线。
+    后台 worker 受并发信号量限制；阻塞调用丢线程池跑。临时文件由 worker 跑完后清理。
     分块流式落盘 + 大小上限，避免大文件全量读进内存 OOM。
     """
+    suffix = Path(file.filename or "upload.pdf").suffix.lower() or ".pdf"
+    if suffix not in SUPPORTED_UPLOAD_EXTS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"不支持的文件格式 {suffix}；支持：{', '.join(sorted(SUPPORTED_UPLOAD_EXTS))}",
+        )
     max_bytes = get_settings().max_upload_mb * 1024 * 1024
-    suffix = Path(file.filename or "upload.pdf").suffix or ".pdf"
     fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     size = 0
     try:

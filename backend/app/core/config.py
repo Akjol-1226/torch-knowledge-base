@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     chat_system_prompt_path: str = ""
 
     max_upload_mb: int = 100  # 单文件上传上限（MB）；超过返回 413，防大文件 OOM
+
+    # 多格式上传：非 PDF（docx/xlsx/pptx/txt 等）先经 Gotenberg 转 PDF，再走现有 PDF 管线。
+    # Gotenberg 是独立容器（封装 LibreOffice），见 docker-compose + docker/gotenberg。
+    gotenberg_url: str = "http://localhost:3000"
+    gotenberg_timeout: int = 180  # 转换超时（秒）；大文档 LibreOffice 渲染较慢
+
     pdf_render_dpi: int = 500  # PDF→PNG 渲染 DPI（喂 VLM 解析）；.env 的 PDF_RENDER_DPI 覆盖
     ocr_render_dpi: int = 200  # OCR 侧车渲染 DPI（只画高亮框、不需高清）；与 VLM DPI 解耦，GPU 上快
     ocr_use_gpu: bool = True  # OCR 默认 GPU(CUDA)；OCR_USE_GPU=false 强制 CPU（无 GPU 也自动回退）

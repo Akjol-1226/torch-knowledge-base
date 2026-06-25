@@ -55,6 +55,7 @@ _archive/               # 旧开发过程文档冻结区（只读，不再更新
 - **LLM 调用统一走 LiteLLM Proxy（OpenAI 兼容）**：对话用 `ChatOpenAI`、PDF 解析用 `core/docparse`、embedding 用 `core/retrieval/embed`，模型名走 config，禁止直连厂商 SDK
 - **检索方案：PageIndex 树 + BM25/向量混合检索（RRF）**：自上而下翻目录 + 自下而上检索；`search_nodes` 内部 BM25 + 向量加权 RRF 融合，向量是增强项、BM25 是底线（embedding 不可用则优雅退回纯 BM25）。embedding 走 LiteLLM Proxy。详见 `decisions/ADR-003` 与 `docs/plans/2026-06-24-hybrid-retrieval-design.md`
 - **入库识别锁定纯 VLM**：保留 `<notsure>...</notsure>` 段落标记机制（不走 MinerU）
+- **多格式上传**：docx/xlsx/pptx/txt 等先经 **Gotenberg**（独立容器，封装 LibreOffice，中文字体焊在 `docker/gotenberg/`）转 PDF，再走现有 PDF 管线；PDF 直接透传。Gotenberg 是**系统级服务、不是 Python 包**，靠 docker-compose 钉版本（本地 dev 跑 `docker compose up -d gotenberg`，`.env` 配 `GOTENBERG_URL`）。见 `app/modules/ingest/doc_convert.py`
 - **渲染 DPI**：VLM 解析用 `pdf_render_dpi`（默认 500，高清助解析）；OCR 侧车（高亮框）用 `ocr_render_dpi`（默认 200，足够且快），两者解耦，均可 `.env` 覆盖
 - **OCR 默认走 GPU**：`onnxruntime-gpu` + nvidia CUDA 库已写进 `pyproject`（含 CPU provider，无 GPU 自动回退）；`OCR_USE_GPU=false` 可强制 CPU。⚠️ 因 `rapidocr-onnxruntime` 传递依赖 CPU 版 onnxruntime，靠 `[tool.uv] override-dependencies` 覆盖掉——别删这条，否则 `uv sync` 会把 OCR 打回 CPU
 - **新增依赖用 `uv add`**，禁手改 pyproject（例外：上面的 onnxruntime-gpu/override 需手写）
