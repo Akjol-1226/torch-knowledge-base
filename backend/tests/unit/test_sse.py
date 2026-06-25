@@ -67,20 +67,19 @@ def test_events_sequence_tool_chunk_answer():
 
 
 def test_sources_group_by_doc_and_dedup_node():
-    """同一文档的多个 node 归到一张卡（诉求1）；重复 handle 去重；保留首次出现顺序。"""
-    hits = [
-        {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
-                  "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}},
-        {"cite": {"doc": "工艺文件", "section": "6 检验", "lines": "15-20",
-                  "handle": "doc_a:0007", "doc_id": "doc_a", "snippet": "外观"}},
-        {"cite": {"doc": "鉴定报告", "section": "结论", "lines": "1-5",
-                  "handle": "doc_b:0001", "doc_id": "doc_b", "snippet": "合格"}},
-    ]
-    dup = {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
-                    "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}}
+    """同一文档的多个 read_node 归到一张卡（诉求1）；重复 handle 去重；保留首次出现顺序。
+    每次 read_node 返回一个含 cite 的 dict（只有 read_node 才进 sources）。"""
+    n3 = {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
+                   "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}}
+    n7 = {"cite": {"doc": "工艺文件", "section": "6 检验", "lines": "15-20",
+                   "handle": "doc_a:0007", "doc_id": "doc_a", "snippet": "外观"}}
+    nb = {"cite": {"doc": "鉴定报告", "section": "结论", "lines": "1-5",
+                   "handle": "doc_b:0001", "doc_id": "doc_b", "snippet": "合格"}}
     stream = [
-        ("updates", {"tools": {"messages": [_tool_msg(hits)]}}),
-        ("updates", {"tools": {"messages": [_tool_msg(dup)]}}),
+        ("updates", {"tools": {"messages": [_tool_msg(n3)]}}),
+        ("updates", {"tools": {"messages": [_tool_msg(n7)]}}),
+        ("updates", {"tools": {"messages": [_tool_msg(nb)]}}),
+        ("updates", {"tools": {"messages": [_tool_msg(n3)]}}),  # 重复 handle → 去重
     ]
     src = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]["sources"]
     # 文档级分组、保序：doc_a 在前，doc_b 在后
@@ -90,6 +89,37 @@ def test_sources_group_by_doc_and_dedup_node():
     assert [n["handle"] for n in src[1]["nodes"]] == ["doc_b:0001"]
     # snippet 透传，供前端高亮
     assert src[0]["nodes"][0]["snippet"] == "峰值245℃"
+
+
+def test_search_results_do_not_enter_sources():
+    """search_nodes 返回的命中列表只是定位线索，不读全文就不算数据来源——不进 sources，
+    其 [[cite]] 也无法在前端成有效上标（确保回答基于 read_node 全文）。"""
+    search_hits = [
+        {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
+                  "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}},
+        {"cite": {"doc": "工艺文件", "section": "6 检验", "lines": "15-20",
+                  "handle": "doc_a:0007", "doc_id": "doc_a", "snippet": "外观"}},
+    ]
+    stream = [
+        # 名为 search_nodes 的工具结果（list）→ 不进 sources
+        ("updates", {"tools": {"messages": [_tool_msg(search_hits)]}}),
+        ("messages", (FakeChunk("回流焊峰值 245℃[[cite:doc_a:0003]]"), {"langgraph_node": "agent"})),
+    ]
+    ans = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]
+    assert ans["sources"] == []          # 搜到但没 read_node → 无数据来源
+    assert "245℃" in ans["text"]         # 答案文本照常返回（前端会丢弃悬空上标）
+
+
+def test_read_then_cite_enters_sources():
+    """先 read_node 读过，再引用同一 handle → 进 sources、视为有据引用。"""
+    rn = {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
+                   "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}}
+    stream = [
+        ("updates", {"tools": {"messages": [_tool_msg(rn)]}}),
+        ("messages", (FakeChunk("峰值 245℃[[cite:doc_a:0003]]"), {"langgraph_node": "agent"})),
+    ]
+    ans = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]
+    assert [n["handle"] for d in ans["sources"] for n in d["nodes"]] == ["doc_a:0003"]
 
 
 def test_cite_without_handle_falls_back_gracefully():

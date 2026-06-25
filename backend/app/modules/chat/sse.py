@@ -1,4 +1,12 @@
 import json
+import re
+
+from app.core.logging import get_logger
+
+log = get_logger("chat.sse")
+
+# 正文里的引用标记 [[cite:<handle>]]，与前端渲染用的正则一致
+_CITE_RE = re.compile(r"\[\[cite:([^\]]+)\]\]")
 
 
 def extract_cite(content) -> list:
@@ -21,8 +29,26 @@ def extract_cite(content) -> list:
 
 def _new_state():
     # sources: 按文档分组的列表；doc_index: doc_id -> 该分组对象（便于追加 node）；
-    # seen: 已收录 node 的去重键集合
-    return {"final": [], "sources": [], "seen": set(), "doc_index": {}}
+    # seen: 已收录 node 的去重键集合；read_ids: 本轮真正 read_node 读过正文的 handle 集合
+    # （只有读过的才算"数据来源"，确保引用基于全文而非 search 片段）
+    return {"final": [], "sources": [], "seen": set(), "doc_index": {}, "read_ids": set()}
+
+
+def _is_read_node_result(tool_name: str, raw) -> bool:
+    """该工具结果是否是 read_node 读到的正文——只有它的 cite 才可作为最终引用来源。
+
+    优先按工具名判定；ToolMessage 缺 name 时按结果形状兜底：read_node 返回【单个含 cite 的
+    dict】，search_nodes 返回 list、错误返回不含 cite 的 dict——都不算。
+    """
+    if tool_name:
+        return tool_name == "read_node"
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return False
+    return isinstance(data, dict) and isinstance(data.get("cite"), dict)
 
 
 def _add_cite(state, cite: dict) -> None:
@@ -68,6 +94,7 @@ def _map_event(mode, data, state):
                     )
                 if m.__class__.__name__ == "ToolMessage":
                     raw = getattr(m, "content", "")
+                    tool_name = getattr(m, "name", "") or ""
                     # 原始工具返回（开发调试展开看）；截断防 SSE 过大
                     content_str = (
                         raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
@@ -75,17 +102,36 @@ def _map_event(mode, data, state):
                     events.append(
                         {
                             "type": "tool_result",
-                            "name": getattr(m, "name", "") or "",
+                            "name": tool_name,
                             "content": content_str[:2000],
                         }
                     )
-                    for c in extract_cite(raw):
-                        _add_cite(state, c)
+                    # 只有 read_node 读到的正文才计入"数据来源"：确保最终引用必须基于实际读过的
+                    # 全文，而非 search_nodes 的片段。搜到但没 read 的节点不进 sources，其 [[cite]]
+                    # 上标在前端因 handle 不在 sources 被丢弃（见 _answer_event 的未读引用校验）。
+                    if _is_read_node_result(tool_name, raw):
+                        for c in extract_cite(raw):
+                            _add_cite(state, c)
+                            if c.get("handle"):
+                                state["read_ids"].add(c["handle"])
     return events
 
 
 def _answer_event(state):
-    return {"type": "answer", "text": "".join(state["final"]), "sources": state["sources"]}
+    text = "".join(state["final"])
+    # 校验引用：正文 [[cite:id]] 必须是本轮 read_node 实际读过的 handle。
+    # 未读就引用 = 模型据 search 片段编引用，前端会因 handle 不在 sources 丢弃该上标；
+    # 这里记一条结构化告警便于监控这种"未据原文"的引用。
+    cited = set(_CITE_RE.findall(text))
+    ungrounded = sorted(cited - state["read_ids"])
+    if ungrounded:
+        log.warning(
+            "chat_ungrounded_citations",
+            count=len(ungrounded),
+            cited=len(cited),
+            ids=ungrounded[:10],
+        )
+    return {"type": "answer", "text": text, "sources": state["sources"]}
 
 
 def events_from_stream(stream):
