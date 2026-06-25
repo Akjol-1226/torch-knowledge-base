@@ -166,6 +166,15 @@ async def view_document(doc_id: str) -> dict:
     return rec
 
 
+@router.get("/document/{doc_id}/tree")
+async def document_tree(doc_id: str) -> dict:
+    """文档的章节树骨架（标题层级 + 页码 + 摘要，不含正文）：前端「查看结构」用。"""
+    rec = await run_in_threadpool(document_service.get_tree, doc_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
+    return rec
+
+
 @router.get("/document/{doc_id}/pdf")
 async def download_document_pdf(doc_id: str) -> FileResponse:
     """元文档：原 PDF 文件流（历史从 md 入库的文档无 PDF → 404）。"""

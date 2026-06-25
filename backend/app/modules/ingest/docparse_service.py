@@ -17,14 +17,17 @@ from app.core.logging import get_logger
 log = get_logger("ingest.docparse")
 
 
-def pdf_to_markdown(pdf_path: str | Path, out_md_path: str | Path) -> Path:
+def pdf_to_markdown(
+    pdf_path: str | Path, out_md_path: str | Path, title: str | None = None
+) -> Path:
     """把单个 PDF 转成 Markdown，写到 out_md_path。返回 md 路径。
 
-    同步阻塞（VLM 逐页调用），需从同步上下文或线程池调用。
+    title：文档大标题（H1）。上传走临时 PDF，stem 是临时名，须显式传真实文档名，
+    否则 H1 会变成 tmpXXXX。同步阻塞（VLM 逐页调用），需从同步上下文或线程池调用。
     """
     settings = get_settings()
     settings.apply_docparse_env()  # 桥接 QWEN_* 必须在 docparse get_config 初始化前
-    convert_pdf_to_markdown(pdf_path=str(pdf_path), output_path=str(out_md_path))
+    convert_pdf_to_markdown(pdf_path=str(pdf_path), output_path=str(out_md_path), title=title)
     log.info("pdf_converted", pdf=str(pdf_path), md=str(out_md_path))
     return Path(out_md_path)
 
@@ -55,7 +58,8 @@ def ingest_pdf(
     # 先解析到临时文件，再按 notsure 决定落待审区还是直接入库
     # 临时名带 uuid：同名文件并发上传不再共用同一 _tmp 路径而互相覆盖
     tmp_md = settings.data_dir / f"_tmp_{stem}_{uuid.uuid4().hex[:8]}.md"
-    pdf_to_markdown(pdf_path, tmp_md)  # 同时写 tmp_md.pagemap.json（行→PDF页 侧车）
+    # 用真实文档名做 H1（stem 来自 original_name），避免临时 PDF 名 tmpXXXX 成为文档大标题
+    pdf_to_markdown(pdf_path, tmp_md, title=stem)  # 同时写 tmp_md.pagemap.json（行→PDF页 侧车）
     md_text = tmp_md.read_text(encoding="utf-8")
     tmp_pagemap = Path(str(tmp_md) + ".pagemap.json")
 

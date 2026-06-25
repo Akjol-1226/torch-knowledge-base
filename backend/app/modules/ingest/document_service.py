@@ -5,12 +5,22 @@
 """
 
 import json
+import re
 from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
 log = get_logger("ingest.document")
+
+# 通用占位标题（附表1 / 附件2 / 表3 / 图1）不参与同名窗口合并——它们在不同段落会重复出现，
+# 按标题相等合并会把不相干的表错并到一起。与 retrieval.treestore 的判定保持一致。
+_GENERIC_TITLE = re.compile(r"^(附表|附件|表|图)\s*\d*$")
+
+
+def _groupable_title(title: str) -> bool:
+    t = (title or "").strip()
+    return bool(t) and not _GENERIC_TITLE.match(t)
 
 
 def _safe(s: str) -> str:
@@ -48,6 +58,60 @@ def get_document(doc_id: str) -> dict | None:
         "kb": doc.get("kb", "default"),
         "md": md,
         "has_pdf": _pdf_path(doc).exists(),
+    }
+
+
+def get_tree(doc_id: str) -> dict | None:
+    """文档的 PageIndex 树骨架（供前端「查看结构」用）：按真实章节划分的嵌套目录。
+
+    长章节在解析时常被分页切成多个【连续同名窗口】（如 G01 配料工序重复 8 次）。这里把
+    连续同名窗口合并成一个章节节点、其子节点（附表等）归并到名下，得到干净的章节目录，
+    而不是把每个窗口都平铺出来。不含正文（text），保持响应轻量；id 形如 <doc_id>:<node_id>。
+    """
+    doc = _load(doc_id)
+    if doc is None:
+        return None
+
+    def prune(nodes: list) -> list:
+        out = []
+        raw = list(nodes)
+        i = 0
+        while i < len(raw):
+            n = raw[i]
+            title = (n.get("title") or "").strip()
+            group = [n]
+            # 合并紧邻其后的同名窗口（仅限可分组标题；通用占位标题如"附表1"不合并）
+            if _groupable_title(title):
+                j = i + 1
+                while j < len(raw) and (raw[j].get("title") or "").strip() == title:
+                    group.append(raw[j])
+                    j += 1
+                i = j
+            else:
+                i += 1
+            first = group[0]
+            merged_children: list = []
+            for w in group:
+                merged_children.extend(w.get("nodes", []) or [])
+            page = next((w.get("page") for w in group if w.get("page") is not None), None)
+            summary = next(
+                (w.get("summary") for w in group if (w.get("summary") or "").strip()), ""
+            )
+            out.append({
+                "id": f"{doc_id}:{first.get('node_id', '')}",
+                "title": first.get("title", ""),
+                "page": page,
+                "summary": summary or "",
+                "windows": len(group),  # 合并了几个分页窗口（前端可标注"·N 段"）
+                "children": prune(merged_children),
+            })
+        return out
+
+    return {
+        "doc_id": doc_id,
+        "doc_name": doc.get("doc_name", ""),
+        "kb": doc.get("kb", "default"),
+        "nodes": prune(doc.get("structure", []) or []),
     }
 
 

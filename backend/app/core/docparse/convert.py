@@ -201,13 +201,15 @@ def convert_pdf_to_markdown(
     pdf_path: str,
     output_path: str,
     debug: bool = False,
+    title: str | None = None,
 ) -> None:
     config = get_config()
     if not config.api_key.strip():
         raise ValueError(
             'QWEN_API_KEY is not set. Add it to .env or environment variables.'
         )
-    file_title = get_file_title(pdf_path)
+    # title 优先：上传走临时 PDF（tmpXXXX.pdf），其 stem 是无意义临时名，必须用真实文档名做 H1
+    file_title = title or get_file_title(pdf_path)
     project_root = Path(pdf_path).parent
     debug_root = project_root / '_debug' / Path(pdf_path).stem
 
