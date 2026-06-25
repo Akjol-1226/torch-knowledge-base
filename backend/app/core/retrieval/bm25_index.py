@@ -12,10 +12,12 @@ log = logging.getLogger("retrieval.bm25")
 
 TITLE_BOOST = 3
 SUMMARY_BOOST = 2
+CONTEXT_BOOST = 2  # 文档名 + 上级章节链：帮"X型号焊接检验"匹配到正文没提 X 的检验节点
 
 
 def _node_tokens(rec: dict) -> list:
     toks = tokenize(rec["title"]) * TITLE_BOOST
+    toks += tokenize(rec.get("context", "")) * CONTEXT_BOOST
     toks += tokenize(rec["summary"]) * SUMMARY_BOOST
     toks += tokenize(rec["text"])
     return toks

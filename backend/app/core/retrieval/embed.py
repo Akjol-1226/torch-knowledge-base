@@ -19,11 +19,18 @@ log = get_logger("retrieval.embed")
 
 
 def compose_text(rec: dict, max_chars: int) -> str:
-    """节点 → 编码输入：title + summary + text 顺序拼接后截断。
+    """节点 → 编码输入：context + title + summary + text 顺序拼接后截断。
 
-    summary（LLM 摘要）是语义核心、放前面 → 截断只丢正文尾部，长节点不整条失真。
+    context（文档名 > 上级章节链）放最前 → 给泛标题节点补上所属文档/章节语境，
+    不同文档里的同名节点不再得到几乎相同的向量。其后 summary（LLM 摘要）是语义核心、
+    再后正文 → 截断只丢正文尾部，长节点不整条失真。
     """
-    parts = [rec.get("title", ""), rec.get("summary", "") or "", rec.get("text", "") or ""]
+    parts = [
+        rec.get("context", "") or "",
+        rec.get("title", ""),
+        rec.get("summary", "") or "",
+        rec.get("text", "") or "",
+    ]
     return "\n".join(p for p in parts if p)[:max_chars]
 
 

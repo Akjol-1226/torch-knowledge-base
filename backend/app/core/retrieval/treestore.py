@@ -214,12 +214,14 @@ class TreeStore:
             return {"error": "检索索引未构建或未加载（请先入库 ingest）"}
         # 多取候选再按 section 折叠 + 按 kb 过滤（检索范围隔离）；kb 过滤会减少命中，故多取候选
         allow = set(kbs) if kbs else None
-        cand = top_k * (6 if allow else 3)
+        s = get_settings()
+        # 候选池深取：两路按同一深度（≥retrieval_top_n）取数，避免 BM25 候选被 top_k 截断、
+        # 与向量取数深度不对称导致 RRF 单边失真。折叠/裁剪到 top_k 在融合之后做。
+        cand = max(s.retrieval_top_n, top_k * (6 if allow else 3))
         bm25_ids = [h["node_id_full"] for h in self._bm25.search(query, top_k=cand)]
         # 混合检索：BM25 + 向量 RRF 融合；向量不可用时退回纯 BM25 顺序（结果结构不变）
         vec_ids = self._vector_search(query, cand)
         if vec_ids:
-            s = get_settings()
             fused = rrf_fuse(bm25_ids, vec_ids, w_bm25=s.rrf_w_bm25, w_vec=s.rrf_w_vec, k=s.rrf_k)
         else:
             fused = [(i, 0.0) for i in bm25_ids]

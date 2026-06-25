@@ -19,6 +19,15 @@ def test_iter_nodes_flattens_with_handles():
     assert handles == {"doc_x:0005", "doc_x:0008", "doc_x:0010"}
 
 
+def test_iter_nodes_context_is_docname_plus_ancestors():
+    tree = {"doc_name": "工艺文件A", **_tree()}
+    recs = {r["node_id_full"]: r for r in iter_nodes("doc_x", tree)}
+    # 顶层节点：只有文档名（无祖先标题）
+    assert recs["doc_x:0005"]["context"] == "工艺文件A"
+    # 子节点：文档名 + 父标题链，不含自身标题
+    assert recs["doc_x:0008"]["context"] == "工艺文件A > 5 SMT工艺"
+
+
 def test_search_ranks_relevant_node_first():
     recs = list(iter_nodes("doc_x", _tree()))
     idx = build_index(recs)

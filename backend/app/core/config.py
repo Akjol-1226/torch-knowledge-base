@@ -59,7 +59,13 @@ class Settings(BaseSettings):
     rrf_k: int = 60  # RRF 平滑常数
     rrf_w_bm25: float = 0.6  # BM25 一路权重（主）
     rrf_w_vec: float = 0.4  # 向量一路权重（辅）
-    vec_sim_threshold: float = 0.30  # 向量准入阈值：余弦相似度低于此的命中不参与融合
+    # 向量准入阈值：低于此的命中不参与融合。取低值——RRF 已让弱向量"沉默而非拖累"，靠融合抑噪
+    vec_sim_threshold: float = 0.15
+
+    # —— 建树（PageIndex）——
+    # 子树合并阈值：整棵子树文本 token 数低于此的父节点，把子节点正文并入自身，
+    # 避免 VLM 产出的大量空壳标题各自成节点、稀释向量并占满候选名额。0 关闭瘦身。
+    tree_thinning_min_tokens: int = 300
 
     def apply_litellm_env(self) -> None:
         """把 LiteLLM Proxy 凭证写进 OPENAI_* env。
