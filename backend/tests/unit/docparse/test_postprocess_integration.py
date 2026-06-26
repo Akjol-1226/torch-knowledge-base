@@ -37,6 +37,8 @@ def test_pipeline_no_duplicate_title():
 
 
 def test_pipeline_promotes_appendix_and_clears_redaction():
+    """Phase 1 标了的附表 → 提升为该页级别标题；图题不在 Phase 1 → 降为加粗。"""
+    from app.core.docparse.models import Heading, PageStructure
     raw = (
         "<!-- page: 1 -->\n"
         "### G01 配料工序工艺规程\n"
@@ -44,7 +46,13 @@ def test_pipeline_promotes_appendix_and_clears_redaction():
         "| 1 | <NOTSURE>/////</NOTSURE> |\n"
         "### 图1-1 示意图\n"
     )
-    out = postprocess_markdown(raw, "Test Doc", _ctx(total_pages=1))
-    assert "### 附表1 配方" in out
+    ctx = _ctx(total_pages=1, page_structures={
+        1: PageStructure(page_no=1, headings=[
+            Heading(text="G01 配料工序工艺规程", level=3),
+            Heading(text="附表1 配方", level=3),
+        ]),
+    })
+    out = postprocess_markdown(raw, "Test Doc", ctx)
+    assert "### 附表1 配方" in out       # Phase 1 标了 → 提升为本页级别标题
     assert "<NOTSURE>" not in out
-    assert "**图1-1 示意图**" in out
+    assert "**图1-1 示意图**" in out      # 图题不在 Phase 1 → 降为加粗

@@ -144,3 +144,31 @@ class TestEdgeCases:
         ctx = _ctx(_ps(1, [_h("G01 配料工序", 2)]))
         result = filter_unmatched_p2_headings(text, ctx)
         assert result == text
+
+
+# ── 文本归一化匹配（空格 / 短标题）─────────────────────────────────────────────
+
+class TestNormalizedMatching:
+    def test_internal_space_difference_kept(self):
+        """VLM 在字母与汉字间插入空格（CTK41B 型）不应导致与 P1（CTK41B型）匹配失败。"""
+        text = "<!-- page: 1 -->\n## CTK41B 型多层片式瓷介固定电容器关键工序及特殊工序控制计划\n\ncontent\n"
+        ctx = _ctx(_ps(1, [_h("CTK41B型多层片式瓷介固定电容器关键工序及特殊工序控制计划", 2)]))
+        result = filter_unmatched_p2_headings(text, ctx)
+        assert "## CTK41B 型多层片式瓷介固定电容器关键工序及特殊工序控制计划" in result
+        assert "**CTK41B" not in result
+
+    def test_short_heading_exact_match_kept(self):
+        """短标题（'目的' 2 字，低于模糊阈值）只要与 P1 精确相等就应保留。"""
+        text = "<!-- page: 2 -->\n### 目的\n\ncontent\n"
+        ctx = _ctx(_ps(2, [_h("目的", 3)]))
+        result = filter_unmatched_p2_headings(text, ctx)
+        assert "### 目的" in result
+        assert "**目的**" not in result
+
+    def test_short_heading_no_false_positive(self):
+        """短标题与 P1 不相等时仍应降级（精确匹配不得放宽为子串）。"""
+        text = "<!-- page: 3 -->\n### 范围\n\ncontent\n"
+        ctx = _ctx(_ps(3, [_h("目的", 3)]))
+        result = filter_unmatched_p2_headings(text, ctx)
+        assert "### 范围" not in result
+        assert "**范围**" in result

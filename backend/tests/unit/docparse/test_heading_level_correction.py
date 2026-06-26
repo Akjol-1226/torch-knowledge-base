@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from app.core.docparse.models import DocumentContext, Heading, PageStructure
 from app.core.docparse.postprocess import correct_heading_levels_from_outline
-from app.core.docparse.utils import normalize_heading_text
 
 
 def _make_doc_ctx(pages: dict[int, list[Heading]]) -> DocumentContext:
@@ -113,15 +112,24 @@ class TestFuzzyMatch:
         assert '###### 可靠性要求' in result
 
     def test_short_text_not_fuzzy_matched(self):
-        """Heading texts shorter than 4 characters are not fuzzy-matched."""
-        raw = '<!-- page: 50 -->\n### 一、\n内容\n'
+        """Short heading texts are not FUZZY (substring) matched — avoids false positives."""
+        raw = '<!-- page: 50 -->\n### 概述\n内容\n'
         ctx = _make_doc_ctx({
-            50: [Heading(text='一、', level=6)]
+            50: [Heading(text='概述要点说明', level=6)]
         })
         result = correct_heading_levels_from_outline(raw, ctx)
-        # Short text, should NOT be corrected
-        assert '### 一、' in result
-        assert '###### 一、' not in result
+        # '概述' 是 '概述要点说明' 的子串，但短文本不做模糊匹配 → 不纠正
+        assert '### 概述' in result
+        assert '###### 概述' not in result
+
+    def test_short_text_exact_match_corrected(self):
+        """Short heading texts that EXACTLY equal a P1 heading are corrected to its level."""
+        raw = '<!-- page: 50 -->\n### 目的\n内容\n'
+        ctx = _make_doc_ctx({
+            50: [Heading(text='目的', level=6)]
+        })
+        result = correct_heading_levels_from_outline(raw, ctx)
+        assert '###### 目的' in result
 
     def test_no_match_different_content(self):
         """Completely different heading text → no correction."""
@@ -257,32 +265,11 @@ class TestAppendixHeadings:
         assert '##### 附件1：测试规范' in result
 
 
-# ── p1_canonical 优先级测试（跨页一致性） ─────────────────────────────────────
+# ── 每页级别（以 Phase 1 为主，不做全局拍平）─────────────────────────────────
 
-class TestP1CanonicalPriority:
-    def test_p1_canonical_overrides_per_page_level(self):
-        """When p1_canonical contains a global-min level, use it instead of
-        the per-page Phase 1 level so that normalize_markdown_heading_levels
-        and correct_heading_levels_from_outline stay in sync."""
-        # Phase 2 output: both pages have ### (H3)
-        # Phase 1 data: page1 says H2, page5 says H3 (inconsistent after relevel)
-        # p1_canonical (global min): H2
-        # Expected: both pages corrected to H2
-        raw = (
-            '<!-- page: 1 -->\n### G01 配料工艺规程\n内容\n'
-            '<!-- page: 5 -->\n### G01 配料工艺规程\n内容\n'
-        )
-        ctx = _make_doc_ctx({
-            1: [Heading(text='G01 配料工艺规程', level=2)],
-            5: [Heading(text='G01 配料工艺规程', level=3)],
-        })
-        p1_canonical = {normalize_heading_text('G01 配料工艺规程'): 2}
-        result = correct_heading_levels_from_outline(raw, ctx, p1_canonical=p1_canonical)
-        assert '## G01 配料工艺规程' in result
-        assert '### G01 配料工艺规程' not in result
-
-    def test_without_p1_canonical_uses_per_page_level(self):
-        """Without p1_canonical the original per-page behaviour is preserved."""
+class TestPerPageLevel:
+    def test_uses_per_page_level_not_flattened(self):
+        """同一标题文本在不同页、Phase 1 级别不同时，各页按各自 Phase 1 级别校正，不拍平。"""
         raw = (
             '<!-- page: 1 -->\n### G01 配料工艺规程\n内容\n'
             '<!-- page: 5 -->\n### G01 配料工艺规程\n内容\n'
@@ -292,13 +279,11 @@ class TestP1CanonicalPriority:
             5: [Heading(text='G01 配料工艺规程', level=3)],
         })
         result = correct_heading_levels_from_outline(raw, ctx)
-        # page1 corrected to H2; page5 Phase1 level=3, Phase2=3 → unchanged
-        assert '## G01 配料工艺规程' in result
-        assert '### G01 配料工艺规程' in result
+        assert '## G01 配料工艺规程' in result   # page1 → 本页 Phase 1 = H2
+        assert '### G01 配料工艺规程' in result  # page5 → 本页 Phase 1 = H3
 
-    def test_postprocess_markdown_keeps_multipage_heading_consistent(self):
-        """End-to-end: the same heading on two pages must have the same level
-        in the final output even when Phase 1 recorded inconsistent levels."""
+    def test_postprocess_markdown_uses_per_page_level(self):
+        """端到端：同一标题在不同页按各自 Phase 1 级别输出（不再强制全局一致）。"""
         from app.core.docparse.postprocess import postprocess_markdown
 
         doc = DocumentContext(
@@ -315,10 +300,7 @@ class TestP1CanonicalPriority:
             '<!-- page: 5 -->\n### G01 配料工艺规程\n内容\n'
         )
         result = postprocess_markdown(raw, '测试', doc, debug=True)
-        lines_with_heading = [
-            ln for ln in result.split('\n') if 'G01 配料工艺规程' in ln
-        ]
-        # Both occurrences must be at the same level
-        assert len(set(lines_with_heading)) == 1, (
-            f'同一标题在不同页出现了不同层级: {lines_with_heading}'
-        )
+        p1_block = result.split('<!-- page: 5 -->')[0]
+        p5_block = result.split('<!-- page: 5 -->')[1]
+        assert '## G01 配料工艺规程' in p1_block
+        assert '### G01 配料工艺规程' in p5_block

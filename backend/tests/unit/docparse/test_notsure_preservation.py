@@ -1,4 +1,3 @@
-from app.core.docparse.postprocess import fix_numbered_heading_levels
 from app.core.docparse.utils import strip_notsure
 from app.core.docparse.validators import (
     ValidationReport,
@@ -10,14 +9,6 @@ from app.core.docparse.validators import (
 
 def test_strip_notsure_preserves_content():
     assert strip_notsure("产值<NOTSURE>增长</NOTSURE>了三成") == "产值增长了三成"
-
-
-def test_notsure_in_heading_preserved_after_level_fix():
-    inp = "## 1.1 <NOTSURE>建设背景</NOTSURE>"
-    out = fix_numbered_heading_levels(inp)
-    assert "<NOTSURE>" in out
-    assert "</NOTSURE>" in out
-    assert out.startswith("###")
 
 
 def test_validator_detects_unclosed_tag():
