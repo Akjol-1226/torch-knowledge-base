@@ -132,3 +132,40 @@ def test_cite_without_handle_falls_back_gracefully():
     src = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]["sources"]
     assert len(src) == 1 and src[0]["doc_id"] == "D"
     assert len(src[0]["nodes"]) == 1
+
+
+def test_answer_reports_ungrounded_citation():
+    """正文引用了本轮没 read_node 读过的节点 → answer.ungrounded 列出它（供 router 触发补读纠正）。"""
+    stream = [("messages", (FakeChunk("结论[[cite:doc_x:0009]]"), {"langgraph_node": "agent"}))]
+    ans = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]
+    assert ans["ungrounded"] == ["doc_x:0009"]
+    assert ans["sources"] == []
+
+
+def test_seed_cites_marks_node_as_grounded():
+    """注入 seed_cites（服务端已补读）后，同一引用不再算 ungrounded，且进 sources。"""
+    seed = [{"doc": "工艺", "section": "S", "lines": "1-2", "handle": "doc_x:0009", "doc_id": "doc_x"}]
+    stream = [("messages", (FakeChunk("结论[[cite:doc_x:0009]]"), {"langgraph_node": "agent"}))]
+    ans = [e for e in events_from_stream(stream, seed_cites=seed) if e["type"] == "answer"][0]
+    assert ans["ungrounded"] == []
+    assert [n["handle"] for g in ans["sources"] for n in g["nodes"]] == ["doc_x:0009"]
+
+
+def test_build_grounding_correction(monkeypatch):
+    """补读：能读到的 → seed_cite + 回灌正文；读不到的（凭空标的）→ 列入"必须删除"。"""
+    import app.modules.chat.tools as tools_mod
+    from app.modules.chat.sse import build_grounding_correction
+
+    class FakeStore:
+        def read_node(self, hid):
+            if hid == "doc_x:0001":
+                return {"title": "流程图", "text": "节点列表：J01 进料检验判定……",
+                        "cite": {"doc": "工艺", "section": "流程图", "lines": "1-9",
+                                 "handle": "doc_x:0001", "doc_id": "doc_x"}}
+            return {"error": "not found"}
+
+    monkeypatch.setattr(tools_mod, "get_store", lambda: FakeStore())
+    seed, text = build_grounding_correction(["doc_x:0001", "doc_x:9999"])
+    assert [c["handle"] for c in seed] == ["doc_x:0001"]   # 只有读到的进 seed
+    assert "节点列表" in text                                # 能读到的回灌正文供核对
+    assert "doc_x:9999" in text and "读不到" in text         # 读不到的列入删除清单

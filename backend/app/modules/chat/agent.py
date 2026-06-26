@@ -4,6 +4,7 @@ langgraph create_react_agent + 5 个只读知识库工具，在 PageIndex 文档
 对话 LLM 统一走团队 LiteLLM Proxy（OpenAI 兼容），模型名走 config.chat_model。
 """
 
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
@@ -14,6 +15,15 @@ from app.modules.chat.tools import KB_TOOLS
 
 def build_chat_model() -> ChatOpenAI:
     settings = get_settings()
+    # 全局限速（进程内、跨并发共享）：chat_rate_limit_rps>0 才启用，0=不限速。
+    # agent 是懒单例 → 此 limiter 也是单例，所有对话请求共用同一令牌桶。
+    rate_limiter = None
+    if settings.chat_rate_limit_rps > 0:
+        rate_limiter = InMemoryRateLimiter(
+            requests_per_second=settings.chat_rate_limit_rps,
+            check_every_n_seconds=0.1,
+            max_bucket_size=max(1, int(settings.chat_rate_limit_rps)),
+        )
     return ChatOpenAI(
         model=settings.chat_model,
         api_key=settings.litellm_api_key.get_secret_value(),  # type: ignore[arg-type]
@@ -21,6 +31,7 @@ def build_chat_model() -> ChatOpenAI:
         temperature=0,
         timeout=60,  # 上游卡住时不要无限挂住一个 worker
         max_retries=2,
+        rate_limiter=rate_limiter,
     )
 
 

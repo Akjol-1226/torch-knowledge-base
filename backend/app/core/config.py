@@ -74,6 +74,38 @@ class Settings(BaseSettings):
     # 建树时逐节点 LLM 摘要的并发上限：一次性并发全部节点会连接风暴(大文档数百节点)，封顶防崩
     summary_concurrency: int = 8
 
+    # —— 对话 agent harness（LangGraph create_react_agent + ChatOpenAI）——
+    # ReAct 图步数上限：一轮 = agent节点+tool节点各一步。默认 25 太小，回答"完整工序"需逐节点
+    # 读全 section.span 时会撞上限报 GraphRecursionError / 答不全；这里放宽到 50。
+    chat_recursion_limit: int = 50
+    # 对话 LLM 全局限速（requests/秒，进程内跨并发共享）。0 = 不限速。
+    # 防瞬时打爆 LiteLLM Proxy 触发 429（与建树摘要并发闸门 summary_concurrency 互补）。
+    chat_rate_limit_rps: float = 0.0
+
+    # —— LangSmith 链路追踪（可观测性，纯环境变量驱动；不配则关闭，零开销）——
+    # 开启后每轮工具调用 / token / 耗时 / prompt 全部上报，便于调检索质量与排查。
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr = SecretStr("")
+    langsmith_project: str = "torch-knowledge-base"
+    langsmith_endpoint: str = ""  # 自建 LangSmith 时填；留空用官方默认
+
+    def apply_langsmith_env(self) -> None:
+        """把 LangSmith 配置桥接到 LangChain 读取的 LANGCHAIN_* env（追踪是 env 驱动的）。
+
+        必须在 agent 首次运行前调用（见 chat router.get_agent）。未开启则显式关闭，
+        避免误读到外部环境里残留的 LANGCHAIN_TRACING_V2。
+        """
+        if not self.langsmith_tracing:
+            os.environ["LANGCHAIN_TRACING_V2"] = "false"
+            return
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = self.langsmith_project
+        key = self.langsmith_api_key.get_secret_value()
+        if key:
+            os.environ["LANGCHAIN_API_KEY"] = key
+        if self.langsmith_endpoint:
+            os.environ["LANGCHAIN_ENDPOINT"] = self.langsmith_endpoint
+
     def apply_litellm_env(self) -> None:
         """把 LiteLLM Proxy 凭证写进 OPENAI_* env。
 

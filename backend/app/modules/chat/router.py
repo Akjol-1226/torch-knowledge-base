@@ -16,11 +16,16 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.modules.chat import conversation_service
 from app.modules.chat.agent import build_agent
-from app.modules.chat.sse import events_from_astream
+from app.modules.chat.sse import build_grounding_correction, events_from_astream
 from app.modules.chat.tools import current_kbs, get_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 log = get_logger("chat")
+
+
+def _sse(ev: dict) -> str:
+    """一个事件 → 一条 SSE data 行。"""
+    return f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
 
 # 请求体上限：单条消息字符数、保留的历史轮数、单条历史字符数
 MAX_MESSAGE_CHARS = 8000
@@ -34,9 +39,23 @@ def get_agent():
     """懒构造 agent：首次请求时才建，避免无凭证时拖垮启动。"""
     global _agent
     if _agent is None:
-        get_settings().apply_litellm_env()  # 把 LiteLLM Proxy 凭证桥接给底层（建树/对话共用）
+        settings = get_settings()
+        settings.apply_litellm_env()      # 把 LiteLLM Proxy 凭证桥接给底层（建树/对话共用）
+        settings.apply_langsmith_env()    # 追踪 env 须在 agent 运行前就绪
         _agent = build_agent()
     return _agent
+
+
+def _run_config(req: "ChatRequest") -> dict:
+    """每轮运行配置：放宽图步数上限（防答不全），并给 LangSmith 追踪打 tag/metadata 便于筛选。"""
+    return {
+        "recursion_limit": get_settings().chat_recursion_limit,
+        "tags": ["chat"],
+        "metadata": {
+            "conversation_id": req.conversation_id or "",
+            "kbs": ",".join(req.kbs) if req.kbs else "all",
+        },
+    }
 
 
 class ChatRequest(BaseModel):
@@ -65,7 +84,9 @@ async def chat_once(req: ChatRequest) -> JSONResponse:
     """非流式问答（调试 / 简单集成用）；前端对话页走 /chat/stream。"""
     token = current_kbs.set(req.kbs)  # 检索范围隔离（工具读 contextvar）；务必配对 reset
     try:
-        result = await get_agent().ainvoke({"messages": _build_messages(req)})
+        result = await get_agent().ainvoke(
+            {"messages": _build_messages(req)}, config=_run_config(req)
+        )
         answer = result["messages"][-1].content
         return JSONResponse({"answer": answer, "sources": []})
     except Exception:
@@ -85,22 +106,56 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         answer_text = ""
         answer_sources: list = []
         try:
+            messages = _build_messages(req)
+            seed_cites = None
+            final_ev = None
             try:
-                astream = get_agent().astream(
-                    {"messages": _build_messages(req)},
-                    stream_mode=["updates", "messages"],
-                )
-                async for ev in events_from_astream(astream):
-                    if ev.get("type") == "answer":
-                        answer_text = ev.get("text") or answer_text
-                        answer_sources = ev.get("sources") or answer_sources
-                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                # 第0轮正常作答；若正文引用了"本轮未 read_node 读过"的节点，
+                # 第1轮自动纠正：服务端补读这些节点回灌 → 让模型据原文重写（上限1次）。
+                for attempt in range(2):
+                    astream = get_agent().astream(
+                        {"messages": messages},
+                        stream_mode=["updates", "messages"],
+                        config=_run_config(req),
+                    )
+                    pending = None
+                    async for ev in events_from_astream(astream, seed_cites=seed_cites):
+                        et = ev.get("type")
+                        if et == "answer":
+                            pending = ev  # 扣住终态，待判定是否需纠正后再决定是否下发
+                        elif et == "chunk":
+                            if attempt == 0:
+                                yield _sse(ev)  # 仅第0轮流式正文；纠正轮靠末尾 answer 整体替换
+                        else:
+                            yield _sse(ev)  # tool / tool_result 始终实时透传
+                    ungrounded = (pending or {}).get("ungrounded") or []
+                    if attempt == 0 and ungrounded:
+                        log.info("chat_grounding_correct", turn=turn,
+                                 n=len(ungrounded), ids=ungrounded[:10])
+                        note = f"核对引用·补读 {len(ungrounded)} 个未读但被引用的节点"
+                        yield _sse({"type": "tool", "name": note})
+                        seed_cites, corrective = await run_in_threadpool(
+                            build_grounding_correction, ungrounded
+                        )
+                        messages = messages + [
+                            {"role": "assistant", "content": (pending or {}).get("text", "")},
+                            {"role": "user", "content": corrective},
+                        ]
+                        continue  # 进入纠正轮
+                    final_ev = pending
+                    break
             except Exception:
                 log.exception("chat_stream_failed", turn=turn)
                 # 独立 error 事件，前端按错误处理；不可发 answer 假装回答完成
-                err = {"type": "error", "text": "服务出错，请稍后重试"}
-                yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
+                yield _sse({"type": "error", "text": "服务出错，请稍后重试"})
                 return
+
+            if final_ev is None:
+                final_ev = {"type": "answer", "text": "", "sources": []}
+            answer_text = final_ev.get("text") or ""
+            answer_sources = final_ev.get("sources") or []
+            yield _sse(final_ev)  # 终态答案（纠正后为修订版）→ 前端整体替换正文+来源
+
             # 流正常结束后持久化本轮（仅当前端带了 conversation_id）
             if req.conversation_id and answer_text:
                 try:

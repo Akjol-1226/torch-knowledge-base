@@ -13,13 +13,13 @@ from app.modules.chat import router as router_mod
 
 
 class FakeAgent:
-    async def ainvoke(self, inp):
+    async def ainvoke(self, inp, config=None, **kwargs):
         class M:  # 末条消息
             content = "答案。来源：D · S · 行1-2"
 
         return {"messages": [M()]}
 
-    async def astream(self, inp, stream_mode=None):
+    async def astream(self, inp, stream_mode=None, config=None, **kwargs):
         tool_msg = type(
             "TM",
             (),
@@ -64,7 +64,7 @@ def test_chat_stream_emits_events(monkeypatch):
 
 
 class BoomAgent:
-    async def astream(self, inp, stream_mode=None):
+    async def astream(self, inp, stream_mode=None, config=None, **kwargs):
         raise RuntimeError("boom")
         yield  # 使其成为 async generator
 
