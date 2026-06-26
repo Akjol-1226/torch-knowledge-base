@@ -31,6 +31,8 @@ class TreeStore:
         self._docs = {}          # doc_id -> doc dict
         self._nodes = {}         # handle -> record
         self._top = {}           # doc_id -> [handle,...] 顶层
+        self._doc_handles = {}   # doc_id -> [handle,...] 该文档全部节点（增量移除用）
+        self._doc_mtime = {}     # doc_id -> workspace json mtime（增量刷新差量判定）
         self._bm25 = None
         self._vec = None         # VectorIndex | None（缺失 → 纯 BM25）
         self._load()
@@ -39,19 +41,86 @@ class TreeStore:
     def _load(self):
         # 先加载域词典：让查询端分词与入库端一致（型号/图号保持整词，否则搜不到）
         load_dict(self.data_dir / "domain_dict_auto.txt")
-        cat_path = self.data_dir / "catalog" / "document_catalog.json"
-        if cat_path.exists():
-            self._catalog = json.loads(cat_path.read_text(encoding="utf-8"))
+        self._load_catalog()
         ws = self.data_dir / "workspace"
         for f in sorted(ws.glob("doc_*.json")) if ws.exists() else []:
+            self._load_doc(f)
+        self._load_indexes()
+
+    def _load_catalog(self):
+        cat_path = self.data_dir / "catalog" / "document_catalog.json"
+        self._catalog = (
+            json.loads(cat_path.read_text(encoding="utf-8")) if cat_path.exists() else []
+        )
+
+    def _load_doc(self, f):
+        """读一个 workspace/doc_*.json 并索引其节点，记录文件 mtime（增量刷新基准）。"""
+        try:
             doc = json.loads(f.read_text(encoding="utf-8"))
-            self._docs[doc["id"]] = doc
-            self._index_doc(doc)
+        except (json.JSONDecodeError, OSError):
+            log.warning("workspace_doc_unreadable_skipped", path=str(f))
+            return
+        self._docs[doc["id"]] = doc
+        self._index_doc(doc)
+        try:
+            self._doc_mtime[doc["id"]] = f.stat().st_mtime
+        except OSError:
+            pass
+
+    def _load_indexes(self):
         idx_dir = self.data_dir / "indexes"
-        if (idx_dir / "meta.json").exists():
-            self._bm25 = BM25Index.load(idx_dir)
+        # BM25 缺失（如删到一篇不剩）要置 None，不能留旧索引
+        self._bm25 = BM25Index.load(idx_dir) if (idx_dir / "meta.json").exists() else None
         # 向量索引为增强项：缺失/损坏 → None → search_nodes 退回纯 BM25
         self._vec = VectorIndex.load(idx_dir)
+
+    def _remove_doc(self, doc_id):
+        """从内存索引里摘除一个文档的全部节点（增量刷新：删除/变更前先清旧）。"""
+        for h in self._doc_handles.pop(doc_id, []):
+            self._nodes.pop(h, None)
+        self._top.pop(doc_id, None)
+        self._docs.pop(doc_id, None)
+        self._doc_mtime.pop(doc_id, None)
+
+    def incremental_clone(self):
+        """返回一个增量刷新后的【新】TreeStore：复用本实例里未变文档的节点结构，
+        只重读 workspace 里新增/变更的文档、摘除已删的。新实例构建好后由调用方原子发布，
+        避免就地修改导致并发查询读到半更新状态（沿用"先建好再发布"语义，但省去全量重解析）。"""
+        new = TreeStore.__new__(TreeStore)
+        new.data_dir = self.data_dir
+        new._catalog = []
+        # 按 doc 粒度整体替换/删除，不改到旧实例仍在用的子结构 → 浅拷贝足够
+        new._docs = dict(self._docs)
+        new._nodes = dict(self._nodes)
+        new._top = dict(self._top)
+        new._doc_handles = dict(self._doc_handles)
+        new._doc_mtime = dict(self._doc_mtime)
+        new._bm25 = None
+        new._vec = None
+        new._apply_refresh()
+        return new
+
+    def _apply_refresh(self):
+        """对已拷贝的内存状态做差量更新：域词典/目录/BM25/向量为全局产物整体重载
+        （远比逐文档重解析树便宜），workspace 仅处理新增/变更/删除的文档。"""
+        load_dict(self.data_dir / "domain_dict_auto.txt")
+        self._load_catalog()
+        ws = self.data_dir / "workspace"
+        current = {f.stem: f for f in ws.glob("doc_*.json")} if ws.exists() else {}
+        for doc_id in list(self._doc_mtime):  # 已删除的文档：摘除其节点
+            if doc_id not in current:
+                self._remove_doc(doc_id)
+        for doc_id, f in current.items():      # 新增/变更的文档：重读重建
+            try:
+                mt = f.stat().st_mtime
+            except OSError:
+                continue
+            if self._doc_mtime.get(doc_id) == mt:
+                continue
+            if doc_id in self._doc_mtime:
+                self._remove_doc(doc_id)       # 变更：先清旧节点再重新索引
+            self._load_doc(f)
+        self._load_indexes()
 
     def _index_doc(self, doc):
         doc_id = doc["id"]
@@ -84,6 +153,9 @@ class TreeStore:
             return handles
 
         self._top[doc_id] = walk(doc.get("structure", []), None, [doc_name])
+
+        # 该文档全部节点句柄（增量刷新摘除本文档时用）
+        self._doc_handles[doc_id] = [h for h, _ in order]
 
         # 行范围：按文档序，end = 下一节点 line_num - 1；末节点 = line_count
         order.sort(key=lambda x: x[1])

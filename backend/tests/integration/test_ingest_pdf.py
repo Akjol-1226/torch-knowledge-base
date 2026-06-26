@@ -24,7 +24,7 @@ def _isolate_data(monkeypatch, tmp_path):
 
 
 def _stub_convert(monkeypatch, md_body: str):
-    def fake(pdf_path, output_path):
+    def fake(pdf_path, output_path, title=None):
         Path(output_path).write_text(md_body, encoding="utf-8")
 
     monkeypatch.setattr(docparse_service, "convert_pdf_to_markdown", fake)
@@ -55,7 +55,7 @@ def test_upload_pdf_with_notsure_goes_to_review(monkeypatch, tmp_path):
 
 def test_upload_pdf_no_notsure_builds(monkeypatch, tmp_path):
     _stub_convert(monkeypatch, "# 干净文档\n内容清晰无歧义。")
-    monkeypatch.setattr(tree_service, "ingest_default", lambda: {"docs": 1, "nodes": 1})
+    monkeypatch.setattr(tree_service, "ingest_one", lambda md_path: {"docs": 1, "nodes": 1})
     client = TestClient(app)
     r = client.post(
         "/ingest/upload-pdf",
@@ -72,7 +72,7 @@ def test_upload_pdf_no_notsure_builds(monkeypatch, tmp_path):
 
 
 def test_review_list_and_approve_writes_back(monkeypatch, tmp_path):
-    monkeypatch.setattr(tree_service, "ingest_default", lambda: {"docs": 1, "nodes": 3})
+    monkeypatch.setattr(tree_service, "ingest_one", lambda md_path: {"docs": 1, "nodes": 3})
     review_service.save_pending(
         "检验记录", "膜厚 <notsure>50±5μm</notsure>，电压 <notsure>?</notsure> V"
     )

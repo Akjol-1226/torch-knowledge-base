@@ -203,6 +203,64 @@ def rebuild_from_workspace() -> dict:
         return {"docs": len(cards), "nodes": len(all_records)}
 
 
+def _resolve_doc_id(ws: Path, doc_name: str, md_path: Path, rel: Path) -> str:
+    """据 doc_name 算 doc_id；与已存在的【不同文件】同名时加路径派生后缀消歧
+    （与 ingest_dir 的冲突处理一致）。同一文件再次入库 → 返回同 id 覆盖（即重跑/重新解析）。"""
+    base = make_doc_id(doc_name)
+    f = ws / f"{base}.json"
+    if f.exists():
+        try:
+            existing = json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+        if Path(existing.get("path", "")).resolve() == md_path:
+            return base  # 同一文件重新入库 → 覆盖（重跑/重新解析同一篇）
+        suffix = hashlib.sha1(
+            str(rel).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:4]
+        return f"{base}_{suffix}"
+    return base
+
+
+def ingest_one(md_path) -> dict:
+    """增量入库单篇 md：只对这一篇 build_tree + 落 workspace，再用 rebuild_from_workspace
+    轻量重建索引/目录（其余文档复用已落盘的树，不重跑摘要、向量按 hash 复用）。
+
+    与 delete 的轻量重建对称——上传/审核一篇文档不该把全库重新建树 + 逐节点 LLM 摘要
+    （那会随库增大越来越慢/烧钱）。kb 由 md 在 data/md 下的子目录推出，与 ingest_dir 一致。
+    """
+    settings = get_settings()
+    settings.apply_litellm_env()
+    md_path = Path(md_path).resolve()
+    md_root = (settings.data_dir / "md").resolve()
+    with INDEX_LOCK:  # RLock：本函数持锁，内部 rebuild_from_workspace 可重入获取
+        ws = settings.data_dir / "workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        try:
+            rel = md_path.relative_to(md_root)
+            kb = rel.parts[0] if len(rel.parts) > 1 else "default"
+        except ValueError:  # md 不在 data/md 下（理论不会，防御）
+            rel = Path(md_path.name)
+            kb = "default"
+        tree = build_tree(str(md_path), model=settings.index_model)
+        annotate_pages(md_path, tree["structure"])
+        doc_id = _resolve_doc_id(ws, tree["doc_name"], md_path, rel)
+        doc = {
+            "id": doc_id,
+            "type": "md",
+            "kb": kb,
+            "path": str(md_path),
+            "doc_name": tree["doc_name"],
+            "doc_description": tree.get("doc_description", ""),
+            "line_count": tree.get("line_count", 0),
+            "structure": tree["structure"],
+        }
+        write_json_atomic(ws / f"{doc_id}.json", doc, indent=2)
+        log.info("ingested_one", doc_id=doc_id, doc_name=tree["doc_name"], kb=kb)
+        # 复用删除路径的轻量重建：BM25 本地重建、向量按 hash 复用、目录从树重写
+        return rebuild_from_workspace()
+
+
 def ingest_default() -> dict:
     """便捷入口：扫 settings.data_dir/md 建树，落 settings.data_dir，模型走 settings.index_model。
 

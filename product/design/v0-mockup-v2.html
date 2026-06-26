@@ -163,6 +163,10 @@
     /* 来源浮层里的上下文：比右侧窄栏更宽松、字号更大，便于阅读 */
     #src-view-ctx .ctx-node { border-left-width: 3px; padding: 8px 14px; margin: 10px 0; }
     #src-view-ctx .ctx-text { font-size: 14px; color: #334155; line-height: 1.65; }
+    /* PDF 视图：抓手光标 + 放大溢出时 safe center 让左/上边可滚动到（普通 center 会裁掉够不到）*/
+    #pdf-canvas-wrap { cursor: grab; justify-content: safe center; }
+    #pdf-canvas-wrap.panning { cursor: grabbing; }
+    #pdf-canvas-wrap.panning canvas { pointer-events: none; }
     #src-view-ctx .ctx-meta { font-size: 12px; margin-bottom: 4px; }
     /* 原文 PDF（PDF.js 渲染）里被引用处的高亮框 */
     #pdf-overlay .pdf-hl { position: absolute; background: rgba(255,224,79,0.34);
@@ -237,6 +241,9 @@
 
     /* 视图切换：默认隐藏 */
     .view-pane.hidden { display: none !important; }
+    /* flex 项默认 min-width:auto 不肯收缩——长文本(如文档描述 truncate)会把卡片撑出视口、
+       把右侧按钮挤到屏幕外(#workspace overflow-hidden 又无法横向滚动看到)。min-width:0 修复。*/
+    .view-pane { min-width: 0; }
 
 
     /* mockup 工具栏 */
@@ -399,7 +406,12 @@
           </div>
 
           <!-- 输入区 -->
-          <div class="px-6 py-5 bg-white/20">
+          <div class="px-6 py-5 bg-white/20 relative">
+            <!-- 流式时若用户上翻脱离底部，显示「回到最新」浮层按钮（不强制抢滚动） -->
+            <button id="chat-scroll-btn" class="hidden absolute -top-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/90 border border-[rgba(28,24,56,0.12)] shadow-md text-[11px] text-slate-600 hover:text-slate-900 hover:bg-white transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+              回到最新
+            </button>
             <div class="relative">
               <textarea id="chat-input" class="input-base !pl-12 !pr-28 !py-4 max-h-32" rows="1" placeholder="继续提问…"></textarea>
               <button class="absolute left-3 top-3 p-2 text-slate-400 hover:text-pastel-purple rounded-xl hover:bg-white/60 transition" title="附件">
@@ -674,6 +686,11 @@
             <button id="pdf-prev" class="btn-ghost !py-1 !px-2.5" title="上一页">◀</button>
             <span id="pdf-pageinfo" class="tabular-nums">—</span>
             <button id="pdf-next" class="btn-ghost !py-1 !px-2.5" title="下一页">▶</button>
+            <span class="mx-1 text-slate-300">|</span>
+            <button id="pdf-zoom-out" class="btn-ghost !py-1 !px-2.5" title="缩小">−</button>
+            <span id="pdf-zoom-label" class="tabular-nums text-center" style="min-width:40px">100%</span>
+            <button id="pdf-zoom-in" class="btn-ghost !py-1 !px-2.5" title="放大">＋</button>
+            <button id="pdf-zoom-fit" class="btn-ghost !py-1 !px-2.5" title="适应宽度">适应</button>
           </div>
           <div id="pdf-canvas-wrap" class="flex-1 overflow-auto custom-scrollbar bg-slate-200/60 flex justify-center items-start py-4">
             <div id="pdf-page-holder" class="relative shadow-lg bg-white">
@@ -747,6 +764,28 @@
     // 通过 server 打开（http://localhost:8000/）走同源；file:// 双击则连本地 8000
     const API_BASE = location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
     const chatStream = document.getElementById('chat-stream');
+
+    // 流式滚动跟随：只有"贴底"时才自动滚；用户上翻脱离底部则停止跟随并显示「回到最新」。
+    let followBottom = true;       // 当前是否跟随底部（贴底 = true）
+    let _autoScrolling = false;    // 程序滚动标志：跳过由它触发的 scroll 事件，避免误判脱离
+    const chatScrollBtn = document.getElementById('chat-scroll-btn');
+    function chatNearBottom(){
+      return chatStream.scrollHeight - chatStream.scrollTop - chatStream.clientHeight < 80;
+    }
+    function scrollChatToBottom(){
+      _autoScrolling = true;
+      chatStream.scrollTop = chatStream.scrollHeight;  // 瞬时滚动：单次 scroll 事件即被标志跳过
+      requestAnimationFrame(() => { _autoScrolling = false; });
+      if(chatScrollBtn) chatScrollBtn.classList.add('hidden');
+    }
+    chatStream.addEventListener('scroll', () => {
+      if(_autoScrolling) return;                        // 忽略程序滚动
+      followBottom = chatNearBottom();                  // 用户手动滚 → 据位置更新跟随态
+      if(chatScrollBtn) chatScrollBtn.classList.toggle('hidden', followBottom);
+    });
+    if(chatScrollBtn) chatScrollBtn.addEventListener('click', () => {
+      followBottom = true; scrollChatToBottom();
+    });
     const chatInput  = document.getElementById('chat-input');
     const chatSend   = document.getElementById('chat-send');
     const refList    = document.getElementById('ref-list');
@@ -896,7 +935,7 @@
         </div>
         <div class="w-9 h-9 rounded-full tile-purple flex items-center justify-center text-sm font-bold flex-shrink-0">我</div>`;
       chatStream.appendChild(el);
-      el.scrollIntoView({behavior:'smooth',block:'end'});
+      followBottom = true; scrollChatToBottom();   // 用户发问 → 回到底部并恢复跟随
     }
 
     function createAiShell(){
@@ -916,7 +955,7 @@
           <div class="text-[10px] text-slate-400 tracking-widest mt-2">${nowTime()}</div>
         </div>`;
       chatStream.appendChild(el);
-      el.scrollIntoView({behavior:'smooth',block:'end'});
+      if(followBottom) scrollChatToBottom();
       const shell = {
         wrap: el,
         steps: el.querySelector('.ai-steps'),
@@ -1071,6 +1110,7 @@
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     let srcPdf = null;            // {url, page, rects:[{page,x0,y0,x1,y1}]}：当前来源的原文 PDF 定位
     let pdfDoc = null, pdfCurUrl = null, pdfCurPage = 1, pdfTotal = 0;  // PDF.js 渲染态
+    let pdfZoom = 1;  // 缩放倍率（1 = 适应宽度）
     function closeSrcModal(){ srcModal.classList.add('hidden'); }
 
     function setSrcTab(tab){
@@ -1092,6 +1132,7 @@
       try{
         if(pdfCurUrl !== url || !pdfDoc){
           pdfCurUrl = url;
+          pdfZoom = 1;  // 换文档时从适应宽度重新开始
           pdfDoc = await pdfjsLib.getDocument(url).promise;
           pdfTotal = pdfDoc.numPages;
         }
@@ -1105,11 +1146,22 @@
       const pg = await pdfDoc.getPage(n);
       const wrap = document.getElementById('pdf-canvas-wrap');
       const base = pg.getViewport({scale: 1});
-      const scale = Math.max(0.2, Math.min((wrap.clientWidth - 24) / base.width, 3));
+      const fit = Math.max(0.2, Math.min((wrap.clientWidth - 24) / base.width, 3));
+      const scale = Math.max(0.1, Math.min(fit * pdfZoom, 8));  // 适宽 × 缩放倍率，封顶 8×
       const vp = pg.getViewport({scale});
       const canvas = document.getElementById('pdf-canvas');
-      canvas.width = vp.width; canvas.height = vp.height;
-      await pg.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+      // 高 DPI 屏(Retina/Windows 缩放)：canvas 后备分辨率按 devicePixelRatio 放大，
+      // CSS 尺寸仍用逻辑像素 → 位图按物理像素渲染，文字清晰不发虚。
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(vp.width * dpr);
+      canvas.height = Math.round(vp.height * dpr);
+      canvas.style.width = vp.width + 'px';
+      canvas.style.height = vp.height + 'px';
+      await pg.render({
+        canvasContext: canvas.getContext('2d'),
+        viewport: vp,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+      }).promise;
       // OCR 高亮框：rects 为页内归一化坐标(0..1)，按当前页过滤后叠加
       const ov = document.getElementById('pdf-overlay');
       ov.style.width = vp.width + 'px'; ov.style.height = vp.height + 'px';
@@ -1117,14 +1169,40 @@
         `<div class="pdf-hl" style="left:${r.x0*100}%;top:${r.y0*100}%;width:${(r.x1-r.x0)*100}%;height:${(r.y1-r.y0)*100}%"></div>`
       ).join('');
       document.getElementById('pdf-pageinfo').textContent = n + ' / ' + pdfTotal;
+      const zl = document.getElementById('pdf-zoom-label');
+      if(zl) zl.textContent = Math.round(pdfZoom * 100) + '%';
+    }
+    function setPdfZoom(z){
+      const nz = Math.max(0.5, Math.min(z, 6));
+      if(nz === pdfZoom) return;
+      pdfZoom = nz;
+      if(pdfDoc) renderPdfPage(pdfCurPage);
     }
     document.getElementById('pdf-prev').addEventListener('click', () => { if(pdfDoc && pdfCurPage > 1) renderPdfPage(pdfCurPage - 1); });
     document.getElementById('pdf-next').addEventListener('click', () => { if(pdfDoc && pdfCurPage < pdfTotal) renderPdfPage(pdfCurPage + 1); });
+    document.getElementById('pdf-zoom-in').addEventListener('click', () => setPdfZoom(pdfZoom + 0.25));
+    document.getElementById('pdf-zoom-out').addEventListener('click', () => setPdfZoom(pdfZoom - 0.25));
+    document.getElementById('pdf-zoom-fit').addEventListener('click', () => setPdfZoom(1));
+    // 鼠标滚轮直接缩放（向上放大、向下缩小）；Ctrl/⌘ + 滚轮、触控板双指捏合同样有效。
+    // 放大后内容超出视口时，用下面的「按住拖动」平移查看。
+    (function(){
+      const w = document.getElementById('pdf-canvas-wrap');
+      w.addEventListener('wheel', e => {
+        e.preventDefault();
+        setPdfZoom(pdfZoom + (e.deltaY < 0 ? 0.2 : -0.2));
+      }, {passive:false});
+      // 按住拖动平移（放大后内容超出视口时滚动 wrap）
+      let on = false, sx = 0, sy = 0, sl = 0, st = 0;
+      w.addEventListener('mousedown', e => { on = true; sx = e.clientX; sy = e.clientY; sl = w.scrollLeft; st = w.scrollTop; w.classList.add('panning'); });
+      window.addEventListener('mousemove', e => { if(!on) return; w.scrollLeft = sl - (e.clientX - sx); w.scrollTop = st - (e.clientY - sy); });
+      window.addEventListener('mouseup', () => { on = false; w.classList.remove('panning'); });
+    })();
 
     // 点右侧来源条 → 居中浮层：拉该节点上下文（本节点 + 相邻/section.span），整段高亮被引用处
     async function openSrcModal(handle){
       if(!handle) return;
       srcModal.classList.remove('hidden');
+      pdfZoom = 1;        // 每次打开浮层都回到默认大小（适应宽度），不沿用上次缩放
       srcPdf = null;
       const ctxBox = document.getElementById('src-view-ctx');
       document.querySelector('#src-tabs [data-src-tab="pdf"]').classList.add('hidden');
@@ -1317,7 +1395,7 @@
               // 流式边收边渲染 markdown（标题/表格/列表实时成形）；rAF 节流。
               // 隐藏未闭合的 [[cite]] 标记；mermaid 块此刻仍是代码态，留到 answer 成图。
               scheduleStreamRender(ai, streamText);
-              ai.wrap.scrollIntoView({behavior:'smooth',block:'end'});
+              if(followBottom) scrollChatToBottom();   // 仅在贴底时跟随，用户上翻不打扰
             } else if(ev.type === 'error'){
               ai.body.innerHTML = '<span class="text-red-500">⚠ ' + escapeHtml(ev.text||'服务出错') + '</span>';
             } else if(ev.type === 'answer'){
@@ -1333,7 +1411,7 @@
               if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已完成';
               conversationHistory.push({role:'user', content:q});
               conversationHistory.push({role:'assistant', content:ev.text||''});
-              ai.wrap.scrollIntoView({behavior:'smooth',block:'end'});
+              if(followBottom) scrollChatToBottom();
               loadConversations();  // 本轮已存盘，刷新侧栏会话列表
             }
           }

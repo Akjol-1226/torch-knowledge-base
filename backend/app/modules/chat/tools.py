@@ -31,7 +31,11 @@ def _catalog_sig():
 
 
 def get_store() -> TreeStore:
-    """惰性单例；catalog/向量索引变更时自动重载，避免检索到旧树。加锁防并发重复重建。"""
+    """惰性单例；catalog/向量索引变更时增量刷新，避免检索到旧树。加锁防并发重复重建。
+
+    变更时不再全量重建：首篇走 TreeStore 全量加载，之后用 incremental_clone 仅重读
+    新增/变更/删除的文档（未变文档节点复用），构建好新实例后原子发布（不就地改，避免并发撕裂）。
+    """
     global _store, _store_sig
     sig = _catalog_sig()
     if _store is not None and sig == _store_sig:
@@ -39,7 +43,10 @@ def get_store() -> TreeStore:
     with _store_lock:
         # 双检：拿锁期间可能已被其他线程重建
         if _store is None or sig != _store_sig:
-            store = TreeStore(get_settings().data_dir)  # 先建好再发布，避免读到半初始化对象
+            if _store is None:
+                store = TreeStore(get_settings().data_dir)  # 首次全量加载
+            else:
+                store = _store.incremental_clone()  # 增量刷新后发布新实例
             _store = store
             _store_sig = sig
     return _store

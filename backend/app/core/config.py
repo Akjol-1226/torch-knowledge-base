@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     pdf_render_dpi: int = 500  # PDF→PNG 渲染 DPI（喂 VLM 解析）；.env 的 PDF_RENDER_DPI 覆盖
     ocr_render_dpi: int = 200  # OCR 侧车渲染 DPI（只画高亮框、不需高清）；与 VLM DPI 解耦，GPU 上快
     ocr_use_gpu: bool = True  # OCR 默认 GPU(CUDA)；OCR_USE_GPU=false 强制 CPU（无 GPU 也自动回退）
+    # OCR 提取调参（低清扫描友好）：box_thresh 略降→召回 faint 文字；unclip_ratio 略升→框完整字形；
+    # min_score 过滤低置信框(印章/噪声)并把置信度存入侧车
+    ocr_box_thresh: float = 0.4
+    ocr_unclip_ratio: float = 1.8
+    ocr_min_score: float = 0.5
 
     # —— 混合检索（BM25 + 向量，RRF 融合）。见 docs/plans/2026-06-24-hybrid-retrieval-design.md ——
     # 向量是增强项、BM25 是底线：embedding 不可用 / 索引缺失 / hybrid off → 自动退回纯 BM25。
@@ -66,6 +71,8 @@ class Settings(BaseSettings):
     # 子树合并阈值：整棵子树文本 token 数低于此的父节点，把子节点正文并入自身，
     # 避免 VLM 产出的大量空壳标题各自成节点、稀释向量并占满候选名额。0 关闭瘦身。
     tree_thinning_min_tokens: int = 300
+    # 建树时逐节点 LLM 摘要的并发上限：一次性并发全部节点会连接风暴(大文档数百节点)，封顶防崩
+    summary_concurrency: int = 8
 
     def apply_litellm_env(self) -> None:
         """把 LiteLLM Proxy 凭证写进 OPENAI_* env。

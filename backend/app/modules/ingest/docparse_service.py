@@ -78,7 +78,7 @@ def ingest_pdf(
         }
 
     # 无 notsure：直接入库（按 kb 落子目录）
-    from app.modules.ingest.tree_service import ingest_default
+    from app.modules.ingest.tree_service import ingest_one
 
     md_dir = settings.data_dir / "md" / kb
     md_dir.mkdir(parents=True, exist_ok=True)
@@ -101,5 +101,5 @@ def ingest_pdf(
         "kb": kb,
         "status": "ready",
         "notsure_count": 0,
-        "tree": ingest_default(),
+        "tree": ingest_one(final_md),  # 增量入库：只建本篇树，其余文档复用 workspace
     }

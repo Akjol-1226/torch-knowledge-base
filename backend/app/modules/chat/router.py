@@ -161,7 +161,7 @@ async def node_context(handle: str) -> JSONResponse:
         cited_cite = node.get("cite", {})
         doc_id = cited_cite.get("doc_id", "")
         page = cited_cite.get("page")
-        # OCR 高亮:用被引用节点标题+正文去匹配 PDF 各页文字框 → 原文上画框（无侧车/匹配不到则 []）
+        # OCR 高亮:用被引用节点正文(= 数据来源展示的上下文)匹配 PDF 各页文字框 → 原文画框
         rects: list = []
         if doc_id and page:
             from app.modules.ingest import document_service, ocr_locate, page_locator
@@ -169,16 +169,24 @@ async def node_context(handle: str) -> JSONResponse:
             md_path = document_service.get_md_path(doc_id)
             ocr = ocr_locate.load_ocr(md_path) if md_path else None
             if ocr:
-                # 节点正文常跨多页：据行范围算页跨度,逐页高亮内容（拿不到侧车则退回单页）
-                parts = (cited_cite.get("lines") or "").split("-")
-                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                    span = page_locator.page_span(md_path, int(parts[0]), int(parts[1]))
-                    pages = span or [page]
-                else:
-                    pages = [page]
-                rects = ocr_locate.rects_for_node(
-                    ocr, pages, node.get("title", ""), node.get("text", "")
-                )
+                def _pages_for(cite: dict) -> list:
+                    # 据节点行范围算 PDF 页跨度（跨多页时逐页；拿不到则退回该节点单页）
+                    parts = (cite.get("lines") or "").split("-")
+                    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                        span = page_locator.page_span(md_path, int(parts[0]), int(parts[1]))
+                        if span:
+                            return span
+                    pg = cite.get("page")
+                    return [pg] if pg else [page]
+
+                # 匹配源：被引用节点正文 + 其直接子节点(附表/附件)正文，各自限定在自己的页
+                # → 表格/附表的内容(挂在子节点上)也能被框住，而不只是被引用节点自己那一小段
+                sources = [(node.get("text", ""), _pages_for(cited_cite))]
+                for ch in store.open_node(handle).get("children", []):
+                    cn = store.read_node(ch["id"])
+                    if "error" not in cn:
+                        sources.append((cn.get("text", ""), _pages_for(cn.get("cite", {}))))
+                rects = ocr_locate.rects_for_node(ocr, sources)
         return {
             "handle": handle,
             "doc_name": cited_cite.get("doc", ""),

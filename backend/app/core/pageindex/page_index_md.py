@@ -18,8 +18,15 @@ async def get_node_summary(node, summary_token_threshold=200, model=None):
 
 async def generate_summaries_for_structure_md(structure, summary_token_threshold, model=None):
     nodes = structure_to_list(structure)
-    tasks = [get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model) for node in nodes]
-    summaries = await asyncio.gather(*tasks)
+    # 限流：一次性 gather 全部节点会向 LLM 发起 N 个并发请求(大文档 N 可达数百) → 连接风暴/超时。
+    # 用 semaphore 把并发摘要数封顶（PAGEINDEX_SUMMARY_CONCURRENCY，由 tree.build_tree 据 config 注入）。
+    sem = asyncio.Semaphore(max(1, int(os.getenv("PAGEINDEX_SUMMARY_CONCURRENCY", "8"))))
+
+    async def _one(node):
+        async with sem:
+            return await get_node_summary(node, summary_token_threshold=summary_token_threshold, model=model)
+
+    summaries = await asyncio.gather(*[_one(node) for node in nodes])
     
     for node, summary in zip(nodes, summaries):
         if not node.get('nodes'):

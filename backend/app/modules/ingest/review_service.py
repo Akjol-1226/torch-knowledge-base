@@ -129,7 +129,18 @@ def approve(doc: str, resolutions: dict[str, str] | None = None, *, build: bool 
 
         result: dict = {"doc": doc, "kb": kb, "status": "approved", "resolved": counter[0]}
         if build:
-            from app.modules.ingest.tree_service import ingest_default
+            from app.modules.ingest.tree_service import ingest_one
 
-            result["tree"] = ingest_default()
+            md_file = target / f"{doc}.md"
+            # 补 OCR 侧车（与直接入库路径一致；失败不阻断）：原 PDF 在进待审前已存到
+            # data/pdf/<kb>/<stem>.pdf，让经审文档同样能在「原文 PDF」里高亮被引处。
+            try:
+                from app.modules.ingest.ocr_locate import write_ocr_sidecar
+
+                pdf_file = get_settings().data_dir / "pdf" / kb / f"{doc}.pdf"
+                if pdf_file.exists():
+                    write_ocr_sidecar(pdf_file, md_file)
+            except Exception:
+                log.exception("ocr_sidecar_failed_on_approve", doc=doc)
+            result["tree"] = ingest_one(md_file)  # 增量入库，不重建全库
         return result

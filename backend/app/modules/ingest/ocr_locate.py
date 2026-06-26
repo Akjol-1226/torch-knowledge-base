@@ -64,7 +64,11 @@ def ocr_document(pdf_path: str | Path, dpi: int = 200) -> dict[str, list[dict]]:
         and "CUDAExecutionProvider" in ort.get_available_providers()
     )
     engine = RapidOCR(det_use_cuda=use_cuda, cls_use_cuda=use_cuda, rec_use_cuda=use_cuda)
-    log.info("ocr_engine", device="cuda" if use_cuda else "cpu", dpi=dpi)
+    s = get_settings()
+    # 提取调参：低 box_thresh 召回faint文字、高 unclip_ratio 框住完整字形（低清扫描友好）
+    ocr_kw = {"box_thresh": s.ocr_box_thresh, "unclip_ratio": s.ocr_unclip_ratio}
+    min_score = s.ocr_min_score
+    log.info("ocr_engine", device="cuda" if use_cuda else "cpu", dpi=dpi, **ocr_kw)
     out: dict[str, list[dict]] = {}
     doc = fitz.open(str(pdf_path))
     try:
@@ -74,11 +78,14 @@ def ocr_document(pdf_path: str | Path, dpi: int = 200) -> dict[str, list[dict]]:
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
             if pix.n == 4:  # RGBA → RGB
                 img = img[:, :, :3]
-            result, _ = engine(img)
+            result, _ = engine(img, **ocr_kw)
             w, h = pix.width, pix.height
             boxes: list[dict] = []
-            for quad, text, _score in result or []:
+            for quad, text, score in result or []:
                 if not (text or "").strip():
+                    continue
+                sc = float(score) if score is not None else 1.0
+                if sc < min_score:  # 滤掉低置信度框（印章/噪声乱框，避免误匹配）
                     continue
                 xs = [p[0] for p in quad]
                 ys = [p[1] for p in quad]
@@ -86,6 +93,7 @@ def ocr_document(pdf_path: str | Path, dpi: int = 200) -> dict[str, list[dict]]:
                     "t": text,
                     "b": [round(min(xs) / w, 4), round(min(ys) / h, 4),
                           round(max(xs) / w, 4), round(max(ys) / h, 4)],
+                    "s": round(sc, 3),  # rec 置信度，匹配时可据此进一步滤噪
                 })
             out[str(i)] = boxes
     finally:
@@ -121,6 +129,44 @@ def load_ocr(md_path: str | Path) -> dict | None:
 _MAX_RECTS = 60
 _GAP_X = 0.02   # 横向就近合并阈值(页宽比例)
 _GAP_Y = 0.035  # 纵向就近合并阈值(页高比例;行间距比横向大)
+_NGRAM = 4
+_FUZZY_RATIO = 0.6   # 长框:与正文【某一行】4-gram 重叠率达此值即命中(按行比,避开跨节点巧合)
+_MARGIN = 0.07       # 上下页边带(页眉/页脚)占页高比例
+_BOILER_MIN_PAGES = 3  # 在多少页的边带重复出现即判为页眉/页脚噪声 → 匹配时排除
+
+
+def _grams(s: str) -> set:
+    if len(s) < _NGRAM:
+        return {s} if s else set()
+    return {s[i:i + _NGRAM] for i in range(len(s) - _NGRAM + 1)}
+
+
+def _line_gramsets(text: str) -> list[set]:
+    """正文按行(\n)拆,每行算一个 gram 集合。匹配时框只需贴近【某一行】即可,
+    而不是跟整节点的 gram 大袋比——后者会让短框靠巧合命中。"""
+    out = []
+    for ln in (text or "").split("\n"):
+        n = _norm(ln)
+        if len(n) >= 3:
+            out.append(_grams(n))
+    return out
+
+
+def _boilerplate(ocr_data: dict) -> set:
+    """跨多页在上下边带重复出现的归一化文本(标题/页眉/页脚/页码) → 匹配时排除,避免每页蹭命中。"""
+    from collections import Counter
+
+    cnt: Counter = Counter()
+    for boxes in ocr_data.values():
+        seen = set()
+        for bx in boxes or []:
+            y0, y1 = bx["b"][1], bx["b"][3]
+            if y1 <= _MARGIN or y0 >= 1 - _MARGIN:  # 只看上下边带
+                n = _norm(bx["t"])
+                if len(n) >= 2 and n not in seen:
+                    seen.add(n)
+                    cnt[n] += 1
+    return {t for t, c in cnt.items() if c >= _BOILER_MIN_PAGES}
 
 
 def _merge_boxes(boxes: list[list[float]]) -> list[list[float]]:
@@ -149,37 +195,43 @@ def _merge_boxes(boxes: list[list[float]]) -> list[list[float]]:
     return rects
 
 
-def rects_for_node(ocr_data: dict, pages: list[int], title: str, text: str = "") -> list[dict]:
-    """匹配被引用节点的标题**和正文**,把命中的 OCR 小框**就近合并成大块**后返回
+def rects_for_node(ocr_data: dict, sources: list) -> list[dict]:
+    """把被引用内容匹配到的 OCR 文字框**就近合并成大块**后返回
     [{page,x0,y0,x1,y1}]（页内归一化坐标）。匹配不到返回 []（前端只跳页不高亮）。
 
-    - 标题:只在首页找(标题框置信度高、字串与标题高度重合)。
-    - 正文:节点常跨多页,逐页把"框文本出现在节点正文里"的框都收集。
-    - 合并:同页内就近聚块 → 整张表格/整段被命中时只画一个大框,而不是几十个小框。
+    sources: list[(text, pages)] —— 被引用节点正文 + 其附表/子节点正文（各自只在自己的页上匹配，
+    且各用自己的文本作 gram 比对，不混成一个大袋）。**不匹配标题**（否则常只框住标题）。
+    每页对每个 OCR 框判命中：
+    - 排除页眉/页脚噪声；
+    - 框文本是正文子串（短而准，保留 245℃ 这类短数值）；或
+    - 框较长(≥6)且与正文【某一行】的 4-gram 重叠率够高 → 容忍 OCR 错字，长句/表格行不再整框落空。
+    合并:同页内就近聚块 → 整张表/整段被命中时画一个大框,而非几十个小框。
     """
-    pages = [p for p in (pages or []) if p]
-    if not ocr_data or not pages:
+    if not ocr_data or not sources:
         return []
+    boiler = _boilerplate(ocr_data)
     by_page: dict[int, list[list[float]]] = {}
-
-    tnorm = _norm(title)
-    if len(tnorm) >= 3:  # 标题:首页
-        for bx in ocr_data.get(str(pages[0])) or []:
-            bn = _norm(bx["t"])
-            if len(bn) >= 4 and (bn in tnorm or tnorm in bn):
-                by_page.setdefault(pages[0], []).append(bx["b"])
-
-    bnorm = _norm(text)
-    if len(bnorm) >= 4:  # 正文:每页
-        for p in pages:
+    for text, pages in sources:
+        snorm = _norm(text)
+        if len(snorm) < 4:
+            continue
+        line_sets = _line_gramsets(text)
+        for p in [p for p in (pages or []) if p]:
             for bx in ocr_data.get(str(p)) or []:
                 bn = _norm(bx["t"])
-                if len(bn) >= 3 and bn in bnorm:
+                if len(bn) < 3 or bn in boiler:
+                    continue
+                hit = bn in snorm
+                if not hit and len(bn) >= 6:
+                    bg = _grams(bn)
+                    if bg and any(len(bg & lg) / len(bg) >= _FUZZY_RATIO for lg in line_sets):
+                        hit = True
+                if hit:
                     by_page.setdefault(p, []).append(bx["b"])
 
     out: list[dict] = []
-    for p in pages:
-        for m in _merge_boxes(by_page.get(p, [])):
+    for p in sorted(by_page):
+        for m in _merge_boxes(by_page[p]):
             out.append({"page": p, "x0": round(m[0], 4), "y0": round(m[1], 4),
                         "x1": round(m[2], 4), "y1": round(m[3], 4)})
             if len(out) >= _MAX_RECTS:

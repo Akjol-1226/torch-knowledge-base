@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 from app.core.config import get_settings
 from app.core.pageindex.page_index_md import md_to_tree
@@ -12,7 +13,10 @@ def build_tree(md_path: str, model: str) -> dict:
     瘦身（tree_thinning_min_tokens > 0）：把整棵子树过小的父节点的子节点正文并入自身，
     减少 VLM 标题切出的碎节点，让节点更密、更可检索。
     """
-    min_tok = get_settings().tree_thinning_min_tokens
+    s = get_settings()
+    min_tok = s.tree_thinning_min_tokens
+    # 摘要并发上限注入 pageindex（它纯靠 env 读配置，与 docparse 同一桥接方式）
+    os.environ["PAGEINDEX_SUMMARY_CONCURRENCY"] = str(s.summary_concurrency)
     coro = md_to_tree(
         md_path=md_path,
         if_thinning=min_tok > 0,
