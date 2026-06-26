@@ -6,6 +6,7 @@
 """
 
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -59,7 +60,9 @@ def ingest_pdf(
     # 临时名带 uuid：同名文件并发上传不再共用同一 _tmp 路径而互相覆盖
     tmp_md = settings.data_dir / f"_tmp_{stem}_{uuid.uuid4().hex[:8]}.md"
     # 用真实文档名做 H1（stem 来自 original_name），避免临时 PDF 名 tmpXXXX 成为文档大标题
+    _t = time.perf_counter()
     pdf_to_markdown(pdf_path, tmp_md, title=stem)  # 同时写 tmp_md.pagemap.json（行→PDF页 侧车）
+    t_parse = time.perf_counter() - _t  # PDF→MD 总时长（细分见 convert 的 [timing] 汇总）
     md_text = tmp_md.read_text(encoding="utf-8")
     tmp_pagemap = Path(str(tmp_md) + ".pagemap.json")
 
@@ -89,17 +92,36 @@ def ingest_pdf(
         shutil.move(str(tmp_pagemap), str(md_dir / f"{stem}.md.pagemap.json"))
     tmp_md.unlink(missing_ok=True)
     # OCR 原 PDF → <md>.ocr.json（扫描件文字框，供「原文 PDF」高亮被引用处）；失败不阻断入库
+    t_ocr = 0.0
     try:
         from app.modules.ingest.ocr_locate import write_ocr_sidecar
 
+        _t = time.perf_counter()
         n_boxes = write_ocr_sidecar(pdf_dir / f"{stem}.pdf", final_md)
-        log.info("ocr_sidecar_written", stem=stem, boxes=n_boxes)
+        t_ocr = time.perf_counter() - _t
+        log.info("ocr_sidecar_written", stem=stem, boxes=n_boxes, secs=round(t_ocr, 1))
     except Exception:
         log.exception("ocr_sidecar_failed", stem=stem)
+
+    _t = time.perf_counter()
+    tree = ingest_one(final_md)  # 增量入库：只建本篇树，其余文档复用 workspace
+    t_tree = time.perf_counter() - _t
+
+    total = t_parse + t_ocr + t_tree
+    log.info(
+        "ingest_timing", stem=stem,
+        parse=round(t_parse, 1), ocr=round(t_ocr, 1), tree=round(t_tree, 1),
+        total=round(total, 1),
+        parse_pct=f"{t_parse / total * 100:.0f}%" if total else "-",
+        ocr_pct=f"{t_ocr / total * 100:.0f}%" if total else "-",
+        tree_pct=f"{t_tree / total * 100:.0f}%" if total else "-",
+    )
     return {
         "document": stem,
         "kb": kb,
         "status": "ready",
         "notsure_count": 0,
-        "tree": ingest_one(final_md),  # 增量入库：只建本篇树，其余文档复用 workspace
+        "timing": {"parse": round(t_parse, 1), "ocr": round(t_ocr, 1),
+                   "tree": round(t_tree, 1), "total": round(total, 1)},
+        "tree": tree,
     }

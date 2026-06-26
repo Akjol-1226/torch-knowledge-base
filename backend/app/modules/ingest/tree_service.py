@@ -6,6 +6,7 @@
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -242,7 +243,11 @@ def ingest_one(md_path) -> dict:
         except ValueError:  # md 不在 data/md 下（理论不会，防御）
             rel = Path(md_path.name)
             kb = "default"
+        _t = time.perf_counter()
         tree = build_tree(str(md_path), model=settings.index_model)
+        t_build = time.perf_counter() - _t  # 含逐节点摘要(LLM)，通常是建树大头
+        log.info("timing_build_tree", secs=round(t_build, 1),
+                 md_lines=tree.get("line_count"))
         annotate_pages(md_path, tree["structure"])
         doc_id = _resolve_doc_id(ws, tree["doc_name"], md_path, rel)
         doc = {
@@ -258,7 +263,11 @@ def ingest_one(md_path) -> dict:
         write_json_atomic(ws / f"{doc_id}.json", doc, indent=2)
         log.info("ingested_one", doc_id=doc_id, doc_name=tree["doc_name"], kb=kb)
         # 复用删除路径的轻量重建：BM25 本地重建、向量按 hash 复用、目录从树重写
-        return rebuild_from_workspace()
+        _t = time.perf_counter()
+        result = rebuild_from_workspace()
+        log.info("timing_rebuild_index", secs=round(time.perf_counter() - _t, 1),
+                 build_tree_secs=round(t_build, 1))
+        return result
 
 
 def ingest_default() -> dict:

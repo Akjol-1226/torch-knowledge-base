@@ -2,6 +2,7 @@ import dataclasses
 import json
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -213,11 +214,17 @@ def convert_pdf_to_markdown(
     project_root = Path(pdf_path).parent
     debug_root = project_root / '_debug' / Path(pdf_path).stem
 
+    # [torch] 分阶段计时，便于定位入库瓶颈（render/phase1/phase1.5/phase2/postprocess）
+    timings: dict[str, float] = {}
+    _t = time.perf_counter()
     page_images = render_pdf_to_images(
         pdf_path=pdf_path,
         dpi=config.pdf_render_dpi,
         output_dir=debug_root / 'pages_img',
     )
+    timings['render'] = time.perf_counter() - _t
+    logger.info('[timing] render: %.1fs (%d pages @ %d dpi)',
+                timings['render'], len(page_images), config.pdf_render_dpi)
 
     document_context = DocumentContext(
         pdf_path=pdf_path,
@@ -226,13 +233,19 @@ def convert_pdf_to_markdown(
     )
 
     logger.info('Phase 1: extracting structure from %d pages', len(page_images))
+    _t = time.perf_counter()
     document_context, page_raw_texts = run_phase1(pdf_path, page_images, document_context)
-
     logger.info('Phase 1: normalizing heading levels globally...')
     normalize_global_headings(document_context)
+    timings['phase1'] = time.perf_counter() - _t
+    logger.info('[timing] phase1 (结构识别+全局归一): %.1fs (%.1fs/页)',
+                timings['phase1'], timings['phase1'] / max(1, len(page_images)))
 
     logger.info('Phase 1.5: releveling heading hierarchy with LLM...')
+    _t = time.perf_counter()
     relevel_headings_with_llm(document_context)
+    timings['phase1.5'] = time.perf_counter() - _t
+    logger.info('[timing] phase1.5 (LLM relevel): %.1fs', timings['phase1.5'])
 
     if debug:
         outline_path = debug_root / 'outline.json'
@@ -259,6 +272,7 @@ def convert_pdf_to_markdown(
         ctx_debug_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info('Precomputing page contexts...')
+    _t = time.perf_counter()
     contexts = precompute_page_contexts(document_context, page_raw_texts)
 
     if debug:
@@ -277,7 +291,12 @@ def convert_pdf_to_markdown(
             results, contexts, page_images,
             max_tail_chars=config.max_previous_tail_chars,
         )
+    timings['phase2'] = time.perf_counter() - _t
+    logger.info('[timing] phase2 (并行转换+续接修复): %.1fs (%.1fs/页, %d 并发)',
+                timings['phase2'], timings['phase2'] / max(1, len(page_images)),
+                config.phase2_max_workers)
 
+    _t = time.perf_counter()
     page_markdowns = [
         f'<!-- page: {page_no} -->\n{results[page_no]}'
         for page_no in range(1, len(page_images) + 1)
@@ -314,5 +333,20 @@ def convert_pdf_to_markdown(
     Path(output_path).write_text(final, encoding='utf-8')
     Path(str(output_path) + '.pagemap.json').write_text(
         json.dumps(page_map, ensure_ascii=False), encoding='utf-8'
+    )
+    timings['postprocess'] = time.perf_counter() - _t
+    logger.info('[timing] postprocess (拼接+校验+pagemap): %.1fs', timings['postprocess'])
+
+    total = sum(timings.values())
+    pct = {k: f'{v / total * 100:.0f}%' for k, v in timings.items()} if total else {}
+    logger.info(
+        '[timing] === PDF→MD 阶段汇总 (%.1fs) === render=%.1fs(%s) phase1=%.1fs(%s) '
+        'phase1.5=%.1fs(%s) phase2=%.1fs(%s) postprocess=%.1fs(%s)',
+        total,
+        timings['render'], pct.get('render', '-'),
+        timings['phase1'], pct.get('phase1', '-'),
+        timings['phase1.5'], pct.get('phase1.5', '-'),
+        timings['phase2'], pct.get('phase2', '-'),
+        timings['postprocess'], pct.get('postprocess', '-'),
     )
     logger.info('Done → %s (page-map runs: %d)', output_path, len(page_map))
