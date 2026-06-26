@@ -146,6 +146,63 @@ def build_vectors_default() -> dict:
         return {"nodes": len(records), "built": True}
 
 
+def rebuild_from_workspace() -> dict:
+    """轻量重建：用已建好的 workspace 树重建 BM25/向量/目录，**不重跑 VLM、不重建树、不重新摘要**。
+
+    供删除文档后调用——删一个文档不该把其余文档全部重新解析 + 逐节点 LLM 摘要（慢且烧钱，
+    之前 delete 走 ingest_default 会卡在 "Generating summaries" 数分钟，表现为"删不掉"）。
+    剩余文档的树已落盘在 workspace/*.json，这里直接复用：BM25 本地重建、向量按 hash 复用旧向量、
+    目录从树重写。catalog 最后写（mtime 是 TreeStore 重载触发器）。
+    """
+    settings = get_settings()
+    out = settings.data_dir
+    with INDEX_LOCK:
+        ws = out / "workspace"
+        domain_dict = out / "domain_dict_auto.txt"
+        # 先清空域词典再由存活文档重建：删掉的文档词条不残留（write_domain_terms 只追加）
+        domain_dict.unlink(missing_ok=True)
+        cards: list = []
+        meta: dict = {}
+        all_records: list = []
+        for f in sorted(ws.glob("doc_*.json")) if ws.exists() else []:
+            try:
+                doc = json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                log.warning("workspace_doc_unreadable_skipped", path=str(f))
+                continue
+            doc_id = doc["id"]
+            kb = doc.get("kb", "default")
+            md_path = Path(doc.get("path", ""))
+            full_text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+            search_text = doc.get("doc_name", "") + "\n" + full_text
+            cards.append({**build_card(doc_id, doc, search_text, domain_dict), "kb": kb})
+            meta[doc_id] = {
+                "type": doc.get("type", "md"),
+                "kb": kb,
+                "doc_name": doc.get("doc_name", ""),
+                "doc_description": doc.get("doc_description", ""),
+                "path": doc.get("path", ""),
+                "line_count": doc.get("line_count", 0),
+            }
+            all_records.extend(iter_nodes(doc_id, doc))
+
+        idx_dir = out / "indexes"
+        if all_records:
+            build_index(all_records).save(idx_dir)
+            _build_vector_index(all_records, idx_dir)  # 节点未变 → 向量按 hash 全部复用，不调 API
+        else:
+            # 删到一篇不剩：清掉索引，避免残留指向已删文档
+            import shutil
+            for name in ("meta.json", "embeddings.npy", "vec_meta.json"):
+                (idx_dir / name).unlink(missing_ok=True)
+            shutil.rmtree(idx_dir / "bm25", ignore_errors=True)
+
+        write_json_atomic(ws / "_meta.json", meta, indent=2)
+        write_json_atomic(out / "catalog" / "document_catalog.json", cards, indent=2)  # commit-last
+        log.info("rebuilt_from_workspace", docs=len(cards), nodes=len(all_records))
+        return {"docs": len(cards), "nodes": len(all_records)}
+
+
 def ingest_default() -> dict:
     """便捷入口：扫 settings.data_dir/md 建树，落 settings.data_dir，模型走 settings.index_model。
 

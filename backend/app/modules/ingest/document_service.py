@@ -131,9 +131,10 @@ def get_pdf_file(doc_id: str) -> Path | None:
 
 
 def delete_document(doc_id: str) -> dict:
-    """删除文档：删 md + 原 PDF + workspace json，重建树/索引/目录。
+    """删除文档：删 md + 原 PDF + workspace json，再用剩余 workspace 树轻量重建索引/目录。
 
     全程持 INDEX_LOCK：让"删文件 + 重建"原子，避免与并发入库交错（删一半被重建复活/丢文档）。
+    重建走 rebuild_from_workspace（不重跑 VLM/不重新摘要），避免删一篇就把全库重新 LLM 摘要。
     """
     from app.modules.ingest.locks import INDEX_LOCK
 
@@ -152,7 +153,9 @@ def delete_document(doc_id: str) -> dict:
         _ws_path(doc_id).unlink(missing_ok=True)
         log.info("document_deleted", doc_id=doc_id, doc_name=doc.get("doc_name"))
 
-        from app.modules.ingest.tree_service import ingest_default
+        # 轻量重建：用现成的 workspace 树重建索引/目录，不重跑 VLM/不重建树/不重新摘要
+        # （删一篇不该让其余文档全部重新 LLM 摘要——那会让 delete 卡数分钟，表现为"删不掉"）
+        from app.modules.ingest.tree_service import rebuild_from_workspace
 
-        tree = ingest_default()
+        tree = rebuild_from_workspace()
         return {"deleted": doc_id, "doc_name": doc.get("doc_name", ""), "tree": tree}
