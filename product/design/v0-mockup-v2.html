@@ -270,6 +270,15 @@
     .tree-page { font-size: 10px; color: #94a3b8; background: rgba(28,24,56,.05); padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
     .tree-children { margin-left: 17px; border-left: 1px dashed rgba(28,24,56,.12); padding-left: 8px; }
     .tree-collapsed > .tree-children { display: none; }
+    /* 叶子可点开看正文 */
+    .tree-row.leaf-clickable { cursor: pointer; }
+    .tree-leaf-detail { margin: 2px 0 6px 30px; padding: 8px 12px; background: #fbfaff; border: 1px solid rgba(28,24,56,.08); border-radius: 8px; }
+    .tree-leaf-detail.hidden { display: none; }
+    .tree-leaf-md { font-size: 12.5px; color: #334155; line-height: 1.65; max-height: 360px; overflow: auto; }
+    .tree-leaf-md table { border-collapse: collapse; font-size: 11.5px; }
+    .tree-leaf-md td, .tree-leaf-md th { border: 1px solid #e2e8f0; padding: 3px 6px; }
+    .tree-leaf-loading, .tree-leaf-err { font-size: 12px; color: #94a3b8; margin: 0; }
+    .tree-leaf-err { color: #ef4444; }
     /* 拖拽上传：文件拖到区域上方时高亮 */
     #upload-drop.drop-active { background: rgba(139,121,212,.12); border-color: #8b79d4; box-shadow: 0 0 0 3px rgba(139,121,212,.15) inset; }
     /* 文档查看弹窗：marked 渲染的 md（含 HTML 表格）基础排版 */
@@ -1737,6 +1746,28 @@
         wrap.appendChild(cbox);
         wrap.classList.add('tree-collapsed');     // 默认收起
         row.addEventListener('click', () => wrap.classList.toggle('tree-collapsed'));
+      } else {
+        // 叶子：点击懒加载并内联展开/收起该节点正文（text_only：不带 PDF/高亮）
+        row.classList.add('leaf-clickable');
+        const detail = document.createElement('div');
+        detail.className = 'tree-leaf-detail hidden';
+        wrap.appendChild(detail);
+        let loaded = false;
+        row.addEventListener('click', async () => {
+          const willShow = detail.classList.contains('hidden');
+          detail.classList.toggle('hidden');
+          if(!willShow || loaded) return;        // 收起、或已加载过 → 不重复请求
+          detail.innerHTML = '<p class="tree-leaf-loading">加载中…</p>';
+          try{
+            const d = await (await fetch(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(node.id))).json();
+            if(d.error){ detail.innerHTML = '<p class="tree-leaf-err">' + escapeHtml(d.error) + '</p>'; return; }
+            const cited = (d.context || []).filter(c => c.is_cited);
+            const items = cited.length ? cited : (d.context || []);
+            const html = items.map(c => mdToHtml(c.text || '')).join('<hr>');
+            detail.innerHTML = '<div class="tree-leaf-md md">' + (html || '（无正文）') + '</div>';
+            loaded = true;
+          }catch(e){ detail.innerHTML = '<p class="tree-leaf-err">加载失败</p>'; }
+        });
       }
       return wrap;
     }
