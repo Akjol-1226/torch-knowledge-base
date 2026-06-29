@@ -854,13 +854,39 @@
     if(window.mermaid) mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:'default'});
     let _mmdSeq = 0;
     // 把已渲染 DOM 里的 ```mermaid 代码块（marked → <pre><code class="language-mermaid">）变成 SVG 图
-    function _mmdNotice(pre, text){
-      // 失败不再静默：在代码块上方插一条可见提示（带上原因），保留原始代码便于排查
+    function _mmdNotice(pre, text, detail){
+      // 失败不再静默：在代码块上方插一条可见提示，并保留原始 mermaid 文本作为「文字版」降级展示。
+      // detail（技术报错）放进 title（hover 可见），不把吓人的 parse error 甩在正文里。
       if(pre.previousElementSibling && pre.previousElementSibling.classList.contains('mermaid-notice')) return;
       const n = document.createElement('div');
       n.className = 'mermaid-notice';
       n.textContent = text;
+      if(detail) n.title = detail;
       pre.before(n);
+    }
+    // 净化:仅在「原样渲染已失败」后才调用 → 合法图永远走不到这里、绝不会被误伤；
+    // 只对已渲不出的坏图修正 LLM 常见非法写法。当前修:把"复合/嵌套形状"收敛成合法矩形 id["标签"]，
+    // 例如 RAW1([/"📦 介电瓷粉 进料"/]) → RAW1["📦 介电瓷粉 进料"]（保留标签文字，丢花哨形状）。
+    function sanitizeMermaid(src){
+      // 只动「明确非法的复合形状 token 对」——合法 mermaid 不存在 ([/ 这种序列；
+      // ([/ … /]) 或 ([\ … \]) 等(stadium 套平行四边形/梯形)→ 收敛成合法矩形 [ … ]，标签连引号原样保留。
+      // 合法的 ["…"]、(["…"])、[/…/](独立平行四边形)、{…}、[[…]] 均不匹配 → 不会误伤(已 node 实测)。
+      return src
+        .replace(/\(\[\s*\//g, '[').replace(/\/\s*\]\)/g, ']')
+        .replace(/\(\[\s*\\/g, '[').replace(/\\\s*\]\)/g, ']');
+    }
+    // 渲染一段 def：成功(替换为 SVG 或用户已切走)返回 null；失败返回 error
+    async function _mmdRender(pre, def){
+      try{
+        const {svg} = await mermaid.render('mmd-' + (_mmdSeq++), def);
+        if(pre.isConnected){                        // await 期间用户已切走 → 不插，但算"已处理"
+          const box = document.createElement('div');
+          box.className = 'mermaid-figure my-3 flex justify-center overflow-x-auto';
+          box.innerHTML = svg;                      // mermaid strict 模式输出，可信
+          pre.replaceWith(box);
+        }
+        return null;
+      }catch(e){ return e; }
     }
     async function renderMermaidIn(root){
       if(!root) return;
@@ -874,17 +900,18 @@
       for(const code of blocks){
         const def = code.textContent || '';        // textContent 还原被 marked 转义的 --> 等字符
         const pre = code.parentElement;
-        try{
-          const {svg} = await mermaid.render('mmd-' + (_mmdSeq++), def);
-          if(!pre.isConnected) continue;           // await 期间用户已切走（新对话清空）→ 跳过
-          const box = document.createElement('div');
-          box.className = 'mermaid-figure my-3 flex justify-center overflow-x-auto';
-          box.innerHTML = svg;                     // mermaid strict 模式输出，可信
-          pre.replaceWith(box);
-        }catch(e){
-          // 渲染失败：可见提示 + 错误摘要，保留原代码块
-          _mmdNotice(pre, '⚠ 流程图渲染失败：' + String((e && e.message) || e).slice(0, 120));
+        // 1) 原样渲染
+        const err = await _mmdRender(pre, def);
+        if(err === null) continue;
+        if(!pre.isConnected) continue;             // 已切走
+        // 2) 净化后重渲一次（仅对刚才失败的图）
+        const fixed = sanitizeMermaid(def);
+        if(fixed !== def && pre.isConnected){
+          if(await _mmdRender(pre, fixed) === null) continue;
         }
+        // 3) 仍失败 → 降级：友好提示 + 保留下方原始 mermaid 文本作为「文字版」，技术报错收进 hover
+        _mmdNotice(pre, '⚠ 此流程图暂时无法渲染成图形，下方为它的文字版（鼠标悬停查看原因）',
+                   String((err && err.message) || err));
       }
     }
 
@@ -1739,36 +1766,46 @@
         + `<span class="tree-title">${escapeHtml(node.title || '（无标题）')}</span>`
         + `<span class="tree-meta">${win}${page}</span>`;
       wrap.appendChild(row);
+
+      // 合并段（windows>1）本身就有窗口正文，可能同时还挂着附表子节点；纯章节(单段)只展开不出正文。
+      // 因此「能点出正文」= 叶子 或 合并段；「能展开」= 有子节点。两者可同时成立（如 G01 配料）。
+      const isSection = (node.windows || 1) > 1;
+      const showsText = !hasKids || isSection;
+
+      // 正文容器在前、子节点容器在后：点开合并段先看它自己的窗口正文，再往下是附表等子节点。
+      let detail = null, loaded = false;
+      if(showsText){
+        row.classList.add('leaf-clickable');
+        detail = document.createElement('div');
+        detail.className = 'tree-leaf-detail hidden';
+        wrap.appendChild(detail);
+      }
       if(hasKids){
         const cbox = document.createElement('div');
         cbox.className = 'tree-children';
         kids.forEach(c => cbox.appendChild(makeTreeNode(c, depth + 1)));
         wrap.appendChild(cbox);
         wrap.classList.add('tree-collapsed');     // 默认收起
-        row.addEventListener('click', () => wrap.classList.toggle('tree-collapsed'));
-      } else {
-        // 叶子：点击懒加载并内联展开/收起该节点正文（text_only：不带 PDF/高亮）
-        row.classList.add('leaf-clickable');
-        const detail = document.createElement('div');
-        detail.className = 'tree-leaf-detail hidden';
-        wrap.appendChild(detail);
-        let loaded = false;
-        row.addEventListener('click', async () => {
-          const willShow = detail.classList.contains('hidden');
-          detail.classList.toggle('hidden');
-          if(!willShow || loaded) return;        // 收起、或已加载过 → 不重复请求
-          detail.innerHTML = '<p class="tree-leaf-loading">加载中…</p>';
-          try{
-            const d = await (await fetch(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(node.id))).json();
-            if(d.error){ detail.innerHTML = '<p class="tree-leaf-err">' + escapeHtml(d.error) + '</p>'; return; }
-            const cited = (d.context || []).filter(c => c.is_cited);
-            const items = cited.length ? cited : (d.context || []);
-            const html = items.map(c => mdToHtml(c.text || '')).join('<hr>');
-            detail.innerHTML = '<div class="tree-leaf-md md">' + (html || '（无正文）') + '</div>';
-            loaded = true;
-          }catch(e){ detail.innerHTML = '<p class="tree-leaf-err">加载失败</p>'; }
-        });
       }
+
+      row.addEventListener('click', async () => {
+        if(hasKids) wrap.classList.toggle('tree-collapsed');   // 展开/收起子节点
+        if(!detail) return;
+        const willShow = detail.classList.contains('hidden');
+        detail.classList.toggle('hidden');
+        if(!willShow || loaded) return;        // 收起、或已加载过 → 不重复请求
+        detail.innerHTML = '<p class="tree-leaf-loading">加载中…</p>';
+        try{
+          const d = await (await fetch(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(node.id))).json();
+          if(d.error){ detail.innerHTML = '<p class="tree-leaf-err">' + escapeHtml(d.error) + '</p>'; return; }
+          // 查看结构：合并段回的是各窗口正文（members，不含附表），单节点回它自身——整段展示，
+          // 不再按 is_cited 过滤（那是引用面板"只高亮被引句"的逻辑，会让合并段只剩第一段）
+          const items = (d.context || []);
+          const html = items.map(c => mdToHtml(c.text || '')).join('<hr>');
+          detail.innerHTML = '<div class="tree-leaf-md md">' + (html || '（无正文）') + '</div>';
+          loaded = true;
+        }catch(e){ detail.innerHTML = '<p class="tree-leaf-err">加载失败</p>'; }
+      });
       return wrap;
     }
     async function openDocTree(docId){

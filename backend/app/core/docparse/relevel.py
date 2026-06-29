@@ -19,38 +19,30 @@ RELEVEL_SYSTEM_PROMPT = """\
 - file_title: 文档标题
 - headings: 按页码顺序排列的所有标题，每条含 page（页码）、text（标题文字）、level（当前层级）
 
+# 背景
+level 是各页**独立识别**的初步结果，跨页可能不一致——尤其：一个标题若单独出现在某页的开头，
+往往会被低估层级（因为那一页看不到它的上级章节）。
+
 # Goal
-检查并修正标题的 level 字段，使文档层次结构合理一致。
+通读全文标题，结合每条的文字、编号线索、所在章节、前后邻居，**自行判断**每条在整篇文档中
+合理的绝对 level，使其构成一棵自洽的层级树。
 
-# Rules（严格执行）
+# 判断要点（综合判断，不是机械套编号）
+- level 取值 2–6，禁止使用 level=1（H1 由系统保留给文档总标题）。
+- 同类工序规程标题（「G01 …工序工艺规程」「G02 …」编号序列）或「第一章/第二章」「一、二、」等
+  章节序列，在文档中彼此对等，必须赋予相同 level。
+- 「附表 N」「附件 N」属于其所在章节的直接子项：往前找最近的章节标题，level = 该章节 + 1，
+  绝不与父章节同级。
+- 正文小节（「本工序要点：」「注意事项：」「一、xxx」「1. xxx」等）的 level 必须大于所属章节。
+- 编号是局部线索而非铁律：x.y 通常在 x 之下、x.y.z 更深，但「1.1」不一定是顶层——要结合它前面
+  真正的父章节判断它的绝对深度。同一节下并列的小节通常应同级；某条明显比并列邻居突兀的，重新斟酌。
+- 被页首"标浅"的标题，请结合它在全文中的位置与上下文，还原它真正的深度。
 
-## 输出格式约束
+# 输出格式约束
 1. 只输出 JSON 数组，格式与输入 headings 完全一致（每项含 page、text、level）。
 2. 禁止用代码块包裹；直接输出裸数组。
 3. 输出条目数量必须与输入完全一致，且顺序不变。
 4. 禁止修改任何条目的 text 或 page 字段。
-5. level 取值范围 2–6，禁止使用 level=1（H1 由系统保留给文档总标题）。
-
-## 层级修正规则
-
-### 同类工序章节平级
-同类工序规程标题（如「G01 xxx工序工艺规程」「G02 xxx工序工艺规程」等编号序列，
-或「第一章」「第二章」等章节序列）在文档中必然是对等关系，必须赋予相同的 level。
-
-### 附表/附件归属
-- 「附表 N」「附件 N」属于其所在工序章节的直接子项。
-- 所属章节：从该附表/附件往前查找最近的工序章节标题（如 G01、G02 等）。
-- 附表/附件的 level = 所属工序章节 level + 1。
-- 若附表/附件当前 level 与所属章节相同（即误置为平级），必须降一级。
-
-### 正文小节归属
-- 形如「本工序要点：」「注意事项：」「一、xxx」「1. xxx」等正文小节，
-  若被标记为标题，其 level 必须大于所属工序章节的 level。
-- 与工序章节同 level 的正文小节视为误赋，level += 1。
-
-## 保守原则
-- 若某条标题层级已经合理（如 level=3 的附表位于 level=2 的章节之下），不做修改。
-- 只改有问题的条目，其余照原样输出。
 """
 
 
@@ -83,11 +75,12 @@ def _parse_corrections(raw: str, collected: list[tuple[int, Heading]]) -> list[i
         return [None] * len(collected)
 
     result: list[int | None] = []
-    for i, (item, (page_no, h)) in enumerate(zip(items, collected)):
-        if item.get('text') != h.text or item.get('page') != page_no:
+    for i, (item, (_page_no, h)) in enumerate(zip(items, collected)):
+        # 按文本匹配即可；LLM 偶尔把页码记串（如 153→154），文本相符仍视为同一条，容忍页码漂移
+        if item.get('text') != h.text:
             logger.warning(
-                'relevel: 第 %d 条不匹配（期望 p.%d "%s"，实得 p.%s "%s"），保留原值',
-                i, page_no, h.text, item.get('page'), item.get('text'),
+                'relevel: 第 %d 条文本不匹配（期望 "%s"，实得 "%s"），保留原值',
+                i, h.text, item.get('text'),
             )
             result.append(None)
             continue

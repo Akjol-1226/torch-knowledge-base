@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import fitz
@@ -17,11 +18,7 @@ from .structure_enrich import (
     page_has_flowchart,
     recover_flowchart_page_heading,
 )
-from .utils import update_heading_stack
-
 logger = logging.getLogger(__name__)
-
-MAX_CONSECUTIVE_VLM_FAILURES = 3
 
 # visual_prominence=="normal" 且 confidence 低于此阈值时视为正文列表项，丢弃
 _PROMINENCE_CONF_THRESHOLD = 0.80
@@ -141,63 +138,68 @@ def run_phase1(
     page_images: list[Path],
     document_context: DocumentContext,
 ) -> tuple[DocumentContext, dict[int, str]]:
-    consecutive_failures = 0
-    phase1_tail: str | None = None
+    """逐页**并行**提取结构。不再维护/传递标题栈或 previous_page_tail——跨页层级
+    一致性由 Phase 1.5 `relevel_headings_with_llm` 全局梳理。每页相互独立，无级联。
+    """
     page_raw_texts: dict[int, str] = {}
-    heading_stack: list[Heading] = []  # 累积标题栈，逐页传给 VLM 提供跨页上下文
-
+    # 文本层提取必须串行（PyMuPDF 文档对象非线程安全），但很快
     with fitz.open(pdf_path) as fitz_doc:
         assert fitz_doc.page_count == len(page_images), (
             f"渲染页数({len(page_images)}) 与 PDF 页数({fitz_doc.page_count}) 不一致"
         )
+        for page_no in range(1, len(page_images) + 1):
+            page_raw_texts[page_no] = fitz_doc[page_no - 1].get_text('text')
 
-        for page_no, image_path in enumerate(page_images, start=1):
-            fitz_page = fitz_doc[page_no - 1]
-            raw_text = fitz_page.get_text('text')
-            page_raw_texts[page_no] = raw_text
+    config = get_config()
 
-            try:
-                ps = extract_page_structure_vlm(
-                    image_path=image_path,
-                    file_title=document_context.file_title,
-                    page_no=page_no,
-                    total_pages=document_context.total_pages,
-                    previous_page_tail=phase1_tail,
-                    heading_stack=heading_stack,
-                )
-                consecutive_failures = 0
-            except Exception as exc:
-                consecutive_failures += 1
-                logger.warning('Phase 1 VLM parse failed page %d: %s', page_no, exc)
-                if consecutive_failures >= MAX_CONSECUTIVE_VLM_FAILURES:
-                    raise Phase1ParseError(
-                        f'Phase 1 VLM failed {consecutive_failures} consecutive pages'
-                    ) from exc
-                ps = PageStructure(page_no=page_no, extraction_method='vlm')
-                phase1_tail = None
+    def process_page(page_no: int, image_path: Path) -> tuple[int, PageStructure, bool]:
+        raw_text = page_raw_texts[page_no]
+        failed = False
+        try:
+            ps = extract_page_structure_vlm(
+                image_path=image_path,
+                file_title=document_context.file_title,
+                page_no=page_no,
+                total_pages=document_context.total_pages,
+                previous_page_tail=None,   # 并行：逐页独立，不传跨页上下文
+                heading_stack=None,        # 层级一致性交给 Phase 1.5 relevel 全局处理
+            )
+        except Exception as exc:
+            failed = True
+            logger.warning('Phase 1 VLM parse failed page %d: %s', page_no, exc)
+            ps = PageStructure(page_no=page_no, extraction_method='vlm')
 
-            ps = enrich_page_structure(ps, raw_text)
+        ps = enrich_page_structure(ps, raw_text)
+        # 流程图页标题漏报时从文本层恢复（无栈，传空栈）
+        if not ps.is_toc_page and page_has_flowchart(ps, raw_text) and not ps.headings:
+            recovered = recover_flowchart_page_heading(raw_text, [])
+            if recovered:
+                ps.headings = [recovered]
+                logger.debug('Page %d: recovered flowchart heading "%s"', page_no, recovered.text)
+        return page_no, ps, failed
 
-            # VLM 兜底：流程图页标题漏报时从文本层恢复
-            if not ps.is_toc_page and page_has_flowchart(ps, raw_text) and not ps.headings:
-                recovered = recover_flowchart_page_heading(raw_text, heading_stack)
-                if recovered:
-                    ps.headings = [recovered]
-                    logger.debug(
-                        'Page %d: recovered flowchart heading "%s" from raw text',
-                        page_no, recovered.text,
-                    )
-
+    failures = 0
+    with ThreadPoolExecutor(max_workers=config.phase2_max_workers) as pool:
+        futures = {
+            pool.submit(process_page, page_no, image_path): page_no
+            for page_no, image_path in enumerate(page_images, start=1)
+        }
+        for future in as_completed(futures):
+            page_no, ps, failed = future.result()
             document_context.page_structures[page_no] = ps
+            failures += failed
 
-            # 用本页标题更新累积栈，供下一页 VLM 参考
-            heading_stack = update_heading_stack(heading_stack, ps.headings + ps.appendix_headings)
+    if failures == len(page_images) and page_images:
+        raise Phase1ParseError(f'Phase 1 VLM failed on all {failures} pages')
 
-            if ps.is_toc_page:
-                document_context.toc_pages.append(page_no)
-                if not document_context.process_sections:
-                    document_context.process_sections = parse_process_sections_from_toc_text(raw_text)
-
-            phase1_tail = extract_phase1_tail(ps)
+    # 汇总（按页序）：目录页与工序段落
+    for page_no in sorted(document_context.page_structures):
+        ps = document_context.page_structures[page_no]
+        if ps.is_toc_page:
+            document_context.toc_pages.append(page_no)
+            if not document_context.process_sections:
+                document_context.process_sections = parse_process_sections_from_toc_text(
+                    page_raw_texts[page_no]
+                )
 
     return document_context, page_raw_texts

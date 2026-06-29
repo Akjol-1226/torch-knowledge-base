@@ -23,6 +23,12 @@ def _groupable_title(title: str) -> bool:
     return bool(t) and not _GENERIC_TITLE.match(t)
 
 
+def _norm_title(title: str) -> str:
+    """同名窗口合并用的标题归一:去掉所有空白。解析常把同一工序的多段窗口标题空格写得
+    不一致(「G03 涂布工序工艺规程」vs「G03涂布工序工艺规程」),精确相等会把本该合并的章节切碎。"""
+    return re.sub(r"\s+", "", title or "")
+
+
 def _safe(s: str) -> str:
     return "".join(c for c in (s or "") if c.isalnum() or c in "-_")[:64]
 
@@ -81,9 +87,11 @@ def get_tree(doc_id: str) -> dict | None:
             title = (n.get("title") or "").strip()
             group = [n]
             # 合并紧邻其后的同名窗口（仅限可分组标题；通用占位标题如"附表1"不合并）
+            # 标题按空格归一化比较：同工序窗口标题空格不一致("G03 涂布"vs"G03涂布")也能合并
             if _groupable_title(title):
+                ntitle = _norm_title(title)
                 j = i + 1
-                while j < len(raw) and (raw[j].get("title") or "").strip() == title:
+                while j < len(raw) and _norm_title(raw[j].get("title")) == ntitle:
                     group.append(raw[j])
                     j += 1
                 i = j

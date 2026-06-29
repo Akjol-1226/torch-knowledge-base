@@ -72,6 +72,15 @@ def test_parse_corrections_text_mismatch_returns_none():
     assert corrections == [None]
 
 
+def test_parse_corrections_page_mismatch_still_applies():
+    """LLM 偶尔把页码记串，但文本相符即视为同一条，仍应采纳层级（按文本匹配，容忍页码漂移）。"""
+    h = _h('4. 风险分析', 2)
+    collected = [(153, h)]
+    raw = '[{"page": 154, "text": "4. 风险分析", "level": 3}]'  # 页码 153→154 漂移
+    corrections = _parse_corrections(raw, collected)
+    assert corrections == [3]
+
+
 def test_parse_corrections_invalid_level_returns_none():
     h = _h('章节一', 2)
     collected = [(1, h)]

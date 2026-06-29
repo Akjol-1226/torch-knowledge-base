@@ -24,6 +24,13 @@ def _is_groupable_title(title: str) -> bool:
     return bool(t) and not _GENERIC_TITLE.match(t)
 
 
+def _norm_title(title: str) -> str:
+    """同名窗口分组用的标题归一:去掉所有空白。
+    解析常把同一工序的多段窗口标题写得空格不一致(如「G03 涂布工序工艺规程」vs
+    「G03涂布工序工艺规程」),精确相等会把本应连成一段的 span 切断 → 用它归一后再比。"""
+    return re.sub(r"\s+", "", title or "")
+
+
 class TreeStore:
     def __init__(self, data_dir):
         self.data_dir = Path(data_dir)
@@ -223,13 +230,14 @@ class TreeStore:
         title = (n["title"] or "").strip()
         if not _is_groupable_title(title):
             return [node_id]
+        ntitle = _norm_title(title)   # 空格归一:G03 涂布… 与 G03涂布… 视为同一工序窗口
         members = [node_id]
         p = n["prev"]
-        while p and (self._nodes.get(p, {}).get("title") or "").strip() == title:
+        while p and _norm_title(self._nodes.get(p, {}).get("title")) == ntitle:
             members.insert(0, p)
             p = self._nodes[p]["prev"]
         nx = n["next"]
-        while nx and (self._nodes.get(nx, {}).get("title") or "").strip() == title:
+        while nx and _norm_title(self._nodes.get(nx, {}).get("title")) == ntitle:
             members.append(nx)
             nx = self._nodes[nx]["next"]
         return members
@@ -252,7 +260,11 @@ class TreeStore:
         for m in members:
             handles.extend(self._descendants(m))
         handles = sorted(set(handles), key=lambda h: self._nodes[h]["line_num"])
-        return {"part": members.index(node_id) + 1, "total": len(members), "span": handles}
+        # members: 仅本段各窗口（不含附表等子节点），按文档序——「查看结构」显示窗口正文用
+        # （附表作为树上子节点单独展开，不在窗口正文里重复）；span: 窗口+子节点全集（引用/补读用）。
+        members = sorted(members, key=lambda h: self._nodes[h]["line_num"])
+        return {"part": members.index(node_id) + 1, "total": len(members),
+                "members": members, "span": handles}
 
     def _vector_search(self, query: str, top_n: int) -> list:
         """向量召回 id 列表；任何不可用（无索引/无 client/构建/编码失败/空间不匹配）都返回 []。"""

@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     gotenberg_url: str = "http://localhost:3000"
     gotenberg_timeout: int = 180  # 转换超时（秒）；大文档 LibreOffice 渲染较慢
 
-    pdf_render_dpi: int = 500  # PDF→PNG 渲染 DPI（喂 VLM 解析）；.env 的 PDF_RENDER_DPI 覆盖
+    # PDF→PNG 渲染 DPI（喂 VLM 解析）；500→600 提升标题/mermaid 质量；.env 可覆盖
+    pdf_render_dpi: int = 600
     ocr_render_dpi: int = 200  # OCR 侧车渲染 DPI（只画高亮框、不需高清）；与 VLM DPI 解耦，GPU 上快
     ocr_use_gpu: bool = True  # OCR 默认 GPU(CUDA)；OCR_USE_GPU=false 强制 CPU（无 GPU 也自动回退）
     # OCR 提取调参（低清扫描友好）：box_thresh 略降→召回 faint 文字；unclip_ratio 略升→框完整字形；
@@ -69,8 +70,9 @@ class Settings(BaseSettings):
 
     # —— 建树（PageIndex）——
     # 子树合并阈值：整棵子树文本 token 数低于此的父节点，把子节点正文并入自身，
-    # 避免 VLM 产出的大量空壳标题各自成节点、稀释向量并占满候选名额。0 关闭瘦身。
-    tree_thinning_min_tokens: int = 300
+    # 0 关闭瘦身。对"引用接地"库,瘦身会把小附表/子节点塌进父节点正文、丢失可引用粒度,
+    # 弊大于利,故默认关闭(保留所有标题为独立可检索/可引用节点)。
+    tree_thinning_min_tokens: int = 0
     # 建树时逐节点 LLM 摘要的并发上限：一次性并发全部节点会连接风暴(大文档数百节点)，封顶防崩
     summary_concurrency: int = 8
 
@@ -132,12 +134,12 @@ class Settings(BaseSettings):
         key = self.litellm_api_key.get_secret_value()
         if key:
             os.environ["QWEN_API_KEY"] = key
-        os.environ["QWEN_MODEL"] = vlm
+        os.environ["QWEN_MODEL"] = vlm          # Phase 1/2 是视觉任务 → VLM
         os.environ["QWEN_OUTLINE_MODEL"] = vlm
-        os.environ["QWEN_RELEVEL_MODEL"] = vlm
-        os.environ.setdefault("QWEN_RELEVEL_MAX_TOKENS", "8192")
-        # 关闭 qwen3 的 thinking（默认就关，显式声明）：qwen_client 据此传
-        # extra_body={"enable_thinking": False}
+        # relevel(Phase 1.5)是纯文本全局推理 + 大输出(每标题一条 JSON)：不再绑定 VLM，
+        # 回落到 docparse 默认独立模型 qwen3.7-max / max_tokens=32768(输出窗口更大，深文档不截断)。
+        # 如需覆盖：.env 设 QWEN_RELEVEL_MODEL / QWEN_RELEVEL_MAX_TOKENS。
+        # 关闭 qwen3 thinking（默认就关，显式声明）：qwen_client 据此传 enable_thinking=False
         os.environ.setdefault("QWEN_ENABLE_THINKING", "false")
         # 渲染 DPI 由 config 统一管（pdf_render_dpi，默认 500，.env 可覆盖）。
         # VLM 现为 qwen 系视觉模型（吃高清大图），用较高 DPI 提升复杂表格/小字解析质量。

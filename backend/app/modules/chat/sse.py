@@ -31,12 +31,16 @@ def _new_state(seed_cites=None):
     # sources: 按文档分组的列表；doc_index: doc_id -> 该分组对象（便于追加 node）；
     # seen: 已收录 node 的去重键集合；read_ids: 本轮真正 read_node 读过正文的 handle 集合
     # （只有读过的才算"数据来源"，确保引用基于全文而非 search 片段）
-    # seed_cites：纠正轮注入"服务端已补读"的节点 → 算"已读"，可合法引用并进数据来源。
-    state = {"final": [], "sources": [], "seen": set(), "doc_index": {}, "read_ids": set()}
+    # read_cites: 本轮（含上一轮带过来的 seed）据正文读过的 cite 原始 dict，供接地纠正轮
+    #   把"已读来源"整体带入下一轮——否则重写时来源清零、第0轮辛苦读到的源会丢（见 router）。
+    # seed_cites：纠正轮注入"上一轮已读 + 服务端已补读"的节点 → 算"已读"，可合法引用并进数据来源。
+    state = {"final": [], "sources": [], "seen": set(), "doc_index": {},
+             "read_ids": set(), "read_cites": []}
     for c in seed_cites or []:
         _add_cite(state, c)
         if c.get("handle"):
             state["read_ids"].add(c["handle"])
+            state["read_cites"].append(c)
     return state
 
 
@@ -120,6 +124,7 @@ def _map_event(mode, data, state):
                             _add_cite(state, c)
                             if c.get("handle"):
                                 state["read_ids"].add(c["handle"])
+                                state["read_cites"].append(c)
     return events
 
 
@@ -138,7 +143,9 @@ def _answer_event(state):
             ids=ungrounded[:10],
         )
     # ungrounded 透出给 router：非空则触发"补读未读节点→重写一次"的接地纠正
-    return {"type": "answer", "text": text, "sources": state["sources"], "ungrounded": ungrounded}
+    # read_cites 透出给 router：供纠正轮把本轮已读来源带进下一轮（router 下发前会剔除，不进前端）
+    return {"type": "answer", "text": text, "sources": state["sources"],
+            "ungrounded": ungrounded, "read_cites": state["read_cites"]}
 
 
 def build_grounding_correction(ungrounded_ids: list) -> tuple:

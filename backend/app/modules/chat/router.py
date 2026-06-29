@@ -134,9 +134,12 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                                  n=len(ungrounded), ids=ungrounded[:10])
                         note = f"核对引用·补读 {len(ungrounded)} 个未读但被引用的节点"
                         yield _sse({"type": "tool", "name": note})
-                        seed_cites, corrective = await run_in_threadpool(
+                        correction_seed, corrective = await run_in_threadpool(
                             build_grounding_correction, ungrounded
                         )
+                        # 关键：把第0轮已据正文读过的来源一并带进纠正轮，否则 _new_state 会清零、
+                        # 重写时模型常不再重读已读节点 → 第0轮的真实来源被丢光（只剩补读那几个）。
+                        seed_cites = ((pending or {}).get("read_cites") or []) + correction_seed
                         messages = messages + [
                             {"role": "assistant", "content": (pending or {}).get("text", "")},
                             {"role": "user", "content": corrective},
@@ -152,6 +155,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
             if final_ev is None:
                 final_ev = {"type": "answer", "text": "", "sources": []}
+            final_ev.pop("read_cites", None)  # 仅服务端纠正轮用，不下发前端
             answer_text = final_ev.get("text") or ""
             answer_sources = final_ev.get("sources") or []
             yield _sse(final_ev)  # 终态答案（纠正后为修订版）→ 前端整体替换正文+来源
@@ -192,10 +196,15 @@ async def node_context(handle: str, text_only: bool = False) -> JSONResponse:
         if "error" in node:
             return None
         sec = node.get("section") or {}
-        span = sec.get("span")
-        handles = list(span) if span else [
-            h for h in (node.get("prev_id"), handle, node.get("next_id")) if h
-        ]
+        if text_only:
+            # 「查看结构」：合并段只显示自己的窗口正文（members，不含附表——附表在树上作为
+            # 子节点单独展开，避免重复）；单节点只显示自身，都不带前后相邻章节。
+            handles = sec.get("members") or [handle]
+        elif sec.get("span"):
+            handles = list(sec["span"])  # 引用面板：整段所有窗口 + 附表等子节点
+        else:
+            # 引用面板单节点：被引用节点 + 前后文，便于看上下文
+            handles = [h for h in (node.get("prev_id"), handle, node.get("next_id")) if h]
         # 兜底：被点的 handle 必须在上下文里，否则前端会没有任何 is_cited 高亮
         if handle not in handles:
             handles.insert(0, handle)

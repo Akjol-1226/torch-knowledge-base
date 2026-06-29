@@ -56,12 +56,15 @@ def extract_nodes_from_markdown(markdown_content):
         if not stripped_line:
             continue
         
-        # Only look for headers when not inside a code block
-        if not in_code_block:
-            match = re.match(header_pattern, stripped_line)
-            if match:
-                title = match.group(2).strip()
-                node_list.append({'node_title': title, 'line_num': line_num})
+        # [torch] 容忍未闭合代码围栏:代码块内若出现 markdown 标题行(^#{1,6} ),
+        # 几乎必是 VLM 的 ```mermaid 漏写收尾 ``` 把后续标题吞了(本语料 ``` 块全是 mermaid,
+        # 内部不会有 ## 标题行)→ 视为围栏在此漏闭合、就地收尾,并把该行当标题。
+        match = re.match(header_pattern, stripped_line)
+        if match:
+            if in_code_block:
+                in_code_block = False
+            title = match.group(2).strip()
+            node_list.append({'node_title': title, 'line_num': line_num})
 
     return node_list, lines
 
