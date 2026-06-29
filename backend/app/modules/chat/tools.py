@@ -59,6 +59,16 @@ def set_store(ts: TreeStore) -> None:
         _store_sig = _catalog_sig()  # 锁定当前签名，避免被 mtime 检测覆盖（测试注入用）
 
 
+def _hide_members(result):
+    """从透给 LLM 的工具结果里摘掉 section.members —— 它仅供 /node 前端「查看结构」显示窗口
+    正文用；agent 要回答完整性问题必须读 section.span（含附表等子节点），别盯着 members 漏读。"""
+    items = result if isinstance(result, list) else [result]
+    for it in items:
+        if isinstance(it, dict) and isinstance(it.get("section"), dict):
+            it["section"].pop("members", None)
+    return result
+
+
 @tool
 def list_catalog() -> list:
     """列出知识库里有哪些文档。返回 [{doc_id, doc_name, doc_description}]。
@@ -87,7 +97,7 @@ def read_node(node_id: str) -> dict:
     section?}。其中 cite 用于写引用；parent_id/prev_id/next_id 用于看上级/相邻章节；
     若带 section:{part,total,span}，说明本节点只是"第 part/共 total 段"，完整内容（含附表等子节点）在 span 列出的所有句柄里——
     回答完整性问题前要把 span 里的句柄逐个 read_node 读全。node_id 原样传回；返回含 error 字段则 id 无效，改用 search_nodes 重新定位。"""
-    return get_store().read_node(node_id)
+    return _hide_members(get_store().read_node(node_id))
 
 
 @tool
@@ -96,7 +106,8 @@ def search_nodes(query: str, top_k: int = 8) -> list | dict:
     返回 [{id, title, score, snippet, cite, path, parent_id, prev_id, next_id, section?}]；命中后视情况用 read_node 读正文。
     若某命中带 section.span，整段已被折叠成这一条代表，完整内容在 span 列出的句柄里。
     注意：返回的是 dict 且含 error 字段时，表示检索索引不可用（不是"没搜到"），不要据此回答"库里没有"。"""
-    return get_store().search_nodes(query, top_k=top_k, kbs=current_kbs.get())
+    result = get_store().search_nodes(query, top_k=top_k, kbs=current_kbs.get())
+    return _hide_members(result) if isinstance(result, list) else result
 
 
 KB_TOOLS = [list_catalog, get_outline, open_node, read_node, search_nodes]

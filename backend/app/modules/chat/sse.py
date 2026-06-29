@@ -38,8 +38,9 @@ def _new_state(seed_cites=None):
              "read_ids": set(), "read_cites": []}
     for c in seed_cites or []:
         _add_cite(state, c)
-        if c.get("handle"):
-            state["read_ids"].add(c["handle"])
+        h = c.get("handle")
+        if h and h not in state["read_ids"]:   # 按 handle 去重，避免重复带入 read_cites
+            state["read_ids"].add(h)
             state["read_cites"].append(c)
     return state
 
@@ -122,8 +123,9 @@ def _map_event(mode, data, state):
                     if _is_read_node_result(tool_name, raw):
                         for c in extract_cite(raw):
                             _add_cite(state, c)
-                            if c.get("handle"):
-                                state["read_ids"].add(c["handle"])
+                            h = c.get("handle")
+                            if h and h not in state["read_ids"]:  # 去重，避免同轮重复读
+                                state["read_ids"].add(h)
                                 state["read_cites"].append(c)
     return events
 

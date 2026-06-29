@@ -113,6 +113,8 @@ def _make_config_with_relevel(enable: bool):
         api_key='k', api_base='b', model='m', outline_model='m',
         relevel_model='m', relevel_max_tokens=32768, relevel_timeout=600.0,
         enable_relevel=enable,
+        phase25_model='m', phase25_max_tokens=8192, phase25_timeout=300.0,
+        enable_phase25=False,
         enable_thinking=False, temperature=0, top_p=0.1,
         max_tokens=8192, seed=None, pdf_render_dpi=600,
         max_previous_tail_chars=300, pymupdf_text_min_chars=50,

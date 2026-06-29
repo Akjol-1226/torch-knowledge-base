@@ -16,6 +16,7 @@ from .validators import validate_markdown, repair_markdown
 from .utils import get_file_title, extract_tail_text, update_heading_stack
 from .structure_enrich import normalize_global_headings
 from .relevel import relevel_headings_with_llm
+from .phase25 import repair_format_with_llm
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +309,19 @@ def convert_pdf_to_markdown(
 
     raw = '\n\n'.join(page_markdowns)
 
+    # Phase 2.5：定点修复跨页续表（逐页转换把长表切断、续页丢空列/数据行误当表头）。
+    # 在 postprocess 前、页标记仍在场时跑；并表时插入续页页标记 → pagemap 仍按原页溯源。
+    # try 包裹：绝不让它拖垮整条入库（失败就退回未修的 raw）。
+    _t25 = time.perf_counter()
+    logger.info('Phase 2.5: 修复跨页续表（断列/数据行误当表头）...')
+    try:
+        raw = repair_format_with_llm(raw)
+    except Exception as exc:
+        logger.warning('Phase 2.5 失败，跳过: %s', exc)
+    timings['phase2.5'] = time.perf_counter() - _t25
+    logger.info('[timing] phase2.5 (跨页续表修复): %.1fs', timings['phase2.5'])
+    _t = time.perf_counter()  # 重置：下方 postprocess 计时不含 Phase 2.5
+
     if debug:
         pp_dir = debug_root / 'postprocess'
         pp_dir.mkdir(parents=True, exist_ok=True)
@@ -341,12 +355,13 @@ def convert_pdf_to_markdown(
     pct = {k: f'{v / total * 100:.0f}%' for k, v in timings.items()} if total else {}
     logger.info(
         '[timing] === PDF→MD 阶段汇总 (%.1fs) === render=%.1fs(%s) phase1=%.1fs(%s) '
-        'phase1.5=%.1fs(%s) phase2=%.1fs(%s) postprocess=%.1fs(%s)',
+        'phase1.5=%.1fs(%s) phase2=%.1fs(%s) phase2.5=%.1fs(%s) postprocess=%.1fs(%s)',
         total,
         timings['render'], pct.get('render', '-'),
         timings['phase1'], pct.get('phase1', '-'),
         timings['phase1.5'], pct.get('phase1.5', '-'),
         timings['phase2'], pct.get('phase2', '-'),
+        timings.get('phase2.5', 0.0), pct.get('phase2.5', '-'),
         timings['postprocess'], pct.get('postprocess', '-'),
     )
     logger.info('Done → %s (page-map runs: %d)', output_path, len(page_map))

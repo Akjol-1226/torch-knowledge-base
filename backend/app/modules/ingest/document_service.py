@@ -20,7 +20,8 @@ _GENERIC_TITLE = re.compile(r"^(附表|附件|表|图)\s*\d*$")
 
 def _groupable_title(title: str) -> bool:
     t = (title or "").strip()
-    return bool(t) and not _GENERIC_TITLE.match(t)
+    # 归一后再判通用占位，与合并键 _norm_title 口径一致（防"附 表1"漏过判定误并）。
+    return bool(t) and not _GENERIC_TITLE.match(_norm_title(title))
 
 
 def _norm_title(title: str) -> str:

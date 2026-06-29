@@ -850,8 +850,11 @@
       return html;
     }
 
-    // mermaid 一次性初始化：手动渲染（startOnLoad:false），strict 防注入
-    if(window.mermaid) mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:'default'});
+    // mermaid 一次性初始化：手动渲染（startOnLoad:false），strict 防注入。
+    // suppressErrorRendering:true —— 关键：解析失败时只抛异常、不再把「Syntax error in text」占位图
+    // 自己塞进 document.body（mermaid v11 默认会塞，且每次失败甩一个 → 满屏清不掉的红色报错）。
+    if(window.mermaid) mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:'default',
+                                           suppressErrorRendering:true});
     let _mmdSeq = 0;
     // 把已渲染 DOM 里的 ```mermaid 代码块（marked → <pre><code class="language-mermaid">）变成 SVG 图
     function _mmdNotice(pre, text, detail){
@@ -877,8 +880,9 @@
     }
     // 渲染一段 def：成功(替换为 SVG 或用户已切走)返回 null；失败返回 error
     async function _mmdRender(pre, def){
+      const id = 'mmd-' + (_mmdSeq++);
       try{
-        const {svg} = await mermaid.render('mmd-' + (_mmdSeq++), def);
+        const {svg} = await mermaid.render(id, def);
         if(pre.isConnected){                        // await 期间用户已切走 → 不插，但算"已处理"
           const box = document.createElement('div');
           box.className = 'mermaid-figure my-3 flex justify-center overflow-x-auto';
@@ -886,7 +890,13 @@
           pre.replaceWith(box);
         }
         return null;
-      }catch(e){ return e; }
+      }catch(e){
+        // 双保险：清掉 mermaid 失败时可能遗留在 body 的报错占位/临时容器（孤儿元素），
+        // 避免「Syntax error in text」残留满屏（配合 initialize 的 suppressErrorRendering）。
+        document.getElementById(id)?.remove();
+        document.getElementById('d' + id)?.remove();
+        return e;
+      }
     }
     async function renderMermaidIn(root){
       if(!root) return;

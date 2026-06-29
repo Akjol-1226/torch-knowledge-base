@@ -21,7 +21,9 @@ _GENERIC_TITLE = re.compile(r"^(附表|附件|表|图)\s*\d*$")
 
 def _is_groupable_title(title: str) -> bool:
     t = (title or "").strip()
-    return bool(t) and not _GENERIC_TITLE.match(t)
+    # 用 _norm_title 归一后再判通用占位：与合并键(_norm_title)口径一致，避免"附 表1"这类
+    # 畸形空格漏过通用判定、被当可分组标题而错并不相干的表。
+    return bool(t) and not _GENERIC_TITLE.match(_norm_title(title))
 
 
 def _norm_title(title: str) -> str:
