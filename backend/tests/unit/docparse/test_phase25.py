@@ -120,7 +120,7 @@ def _raw_two_pages(prev: str, curr: str) -> str:
     return f"<!-- page: 2 -->\n{prev}\n\n<!-- page: 3 -->\n{curr}"
 
 
-def test_repair_fixes_continuation_in_place():
+def test_repair_merges_continuation_into_prev_page():
     raw = _raw_two_pages(_PREV, _CURR)
     fixed_rows = "| 23 | 首件鉴定目录 | TE-QR-G1247 | |\n| 24 | 首件生产 | TE-QR-G1249 | |"
 
@@ -130,17 +130,13 @@ def test_repair_fixes_continuation_in_place():
         out = repair_format_with_llm(raw)
 
     assert m.called
-    # 续表行被对齐成 4 列、且去掉了被误当表头的分隔行
+    # 续表行被对齐成 4 列、合并到上一页(page2)表尾 → 跨页表合成一张完整可渲染表
     assert '| 23 | 首件鉴定目录 | TE-QR-G1247 | |' in out
     assert '| 24 | 首件生产 | TE-QR-G1249 | |' in out
-    assert '| 23 | 首件鉴定目录 | TE-QR-G1247 |\n' not in out  # 原 3 列残留应消失
-    # [torch 就地修列] 行留在原页 page3（不搬到 page2），页码归属天然正确
     page2 = out.split('<!-- page: 3 -->')[0]
     page3 = out.split('<!-- page: 3 -->')[1]
-    assert '| 21 | 样品制造' in page2 and '| 23 |' not in page2  # page2 不变、未被塞入续表行
-    assert '| 23 |' in page3 and '| 24 |' in page3              # 续表行仍在 page3
-    # 不插标记、不产生重复页标记
-    assert out.count('<!-- page: 3 -->') == 1
+    assert '| 23 |' in page2 and '| 24 |' in page2              # 续表行已并入 page2 表尾
+    assert '| 23 | 首件鉴定目录 | TE-QR-G1247 |\n' not in page3  # page3 不再以那截 3 列表格开头
     assert '<!-- page: 2 -->' in out and '<!-- page: 3 -->' in out
 
 
@@ -185,8 +181,8 @@ def _fake_align_to_4cols(ref_lines, frag_lines):
     return '\n'.join(out)
 
 
-def test_repair_chains_three_page_table_in_place():
-    # 同一张 4 列表跨 3 页：page3、page4 各自就地对齐成 4 列，行留在各自页
+def test_repair_chains_three_page_table():
+    # 同一张 4 列表跨 3 页：page3、page4 都应并回 page2，合成一张完整表
     prev = ("| 序号 | 文件名称 | 文件编号 | 备注 |\n| :--- | :--- | :--- | :--- |\n"
             "| 1 | a | X1 | |")
     mid = "| 2 | b | X2 |\n| :--- | :--- | :--- |\n| 3 | c | X3 |"
@@ -196,17 +192,11 @@ def test_repair_chains_three_page_table_in_place():
     with patch.object(phase25, 'get_config', return_value=cfg), \
          patch.object(phase25, '_call_repair', side_effect=_fake_align_to_4cols):
         out = repair_format_with_llm(raw)
-    # 全部 5 行都应出现、且为 4 列
+    # 全部 5 行都应并入 page2、且为 4 列
+    page2 = out.split('<!-- page: 3 -->')[0]
     for n in ('1', '2', '3', '4', '5'):
-        assert f'| {n} |' in out, f'第{n}行未出现'
-    assert '| 5 | e | X5 |  |' in out
-    # [torch 就地修列] 行各留原页：row1∈page2，row2/3∈page3，row4/5∈page4；页标记不重复
-    page2, rest = out.split('<!-- page: 3 -->')
-    page3, page4 = rest.split('<!-- page: 4 -->')
-    assert '| 1 |' in page2 and '| 2 |' not in page2
-    assert '| 2 |' in page3 and '| 3 |' in page3 and '| 4 |' not in page3
-    assert '| 4 |' in page4 and '| 5 |' in page4
-    assert out.count('<!-- page: 3 -->') == 1 and out.count('<!-- page: 4 -->') == 1
+        assert f'| {n} |' in page2, f'第{n}行未并入 page2'
+    assert '| 5 | e | X5 |  |' in page2
 
 
 def test_repair_no_boundary_leaves_text_unchanged():

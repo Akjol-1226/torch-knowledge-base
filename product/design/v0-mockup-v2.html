@@ -11,6 +11,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="vendor/mermaid.min.js"></script>
   <script src="vendor/purify.min.js"></script>
+  <link rel="stylesheet" href="vendor/katex.min.css">
+  <script src="vendor/katex.min.js"></script>
+  <script src="vendor/auto-render.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -898,6 +901,23 @@
         return e;
       }
     }
+    // 把 root 内的 LaTeX（$..$ / $$..$$ / \(..\) / \[..\]）渲染成公式。KaTeX 默认跳过
+    // pre/code（mermaid 块在那），互不干扰；非法公式按原文显示不抛错。
+    function renderMathIn(root){
+      if(!root || !window.renderMathInElement) return;
+      try{
+        renderMathInElement(root, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$', right: '$', display: false},
+          ],
+          throwOnError: false,
+          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        });
+      }catch(e){}
+    }
     async function renderMermaidIn(root){
       if(!root) return;
       const blocks = root.querySelectorAll('pre > code.language-mermaid');
@@ -1367,6 +1387,7 @@
             ai.body.classList.add('md');
             ai.body.innerHTML = renderMarkdown(m.content);
             renderMermaidIn(ai.body);             // 历史会话里的 ```mermaid 块也渲染成图
+            renderMathIn(ai.body);                // 历史会话里的 $..$ LaTeX → 公式
             attachSourcesButton(ai, refs, '');    // 重建「数据来源」按钮（来源已随会话持久化）
             if(refs.length) lastRefs = refs;
             conversationHistory.push({role:'assistant', content:m.content});
@@ -1453,6 +1474,7 @@
               ai.body.classList.add('md');
               ai.body.innerHTML = renderMarkdown(answerText);  // 正文上标据 citeIndex（marked 渲染标题/表格）
               renderMermaidIn(ai.body);                // ```mermaid 块 → 流程图 SVG
+              renderMathIn(ai.body);                   // $..$ LaTeX → 公式
               attachSourcesButton(ai, refs, q);        // 本条回答下方「数据来源」按钮（单独存住，不被新问题覆盖）
               if(steps.length) ai.stepsLabel.textContent = '检索 ' + steps.length + ' 步 · 已完成';
               conversationHistory.push({role:'user', content:q});
@@ -1780,7 +1802,8 @@
       // 合并段（windows>1）本身就有窗口正文，可能同时还挂着附表子节点；纯章节(单段)只展开不出正文。
       // 因此「能点出正文」= 叶子 或 合并段；「能展开」= 有子节点。两者可同时成立（如 G01 配料）。
       const isSection = (node.windows || 1) > 1;
-      const showsText = !hasKids || isSection;
+      // 能点出正文 = 叶子 / 合并段 / 本身带正文的章节(如开头「设计开发记录」其正文就是目录表)。
+      const showsText = !hasKids || isSection || !!node.has_text;
 
       // 正文容器在前、子节点容器在后：点开合并段先看它自己的窗口正文，再往下是附表等子节点。
       let detail = null, loaded = false;
@@ -1813,6 +1836,7 @@
           const items = (d.context || []);
           const html = items.map(c => mdToHtml(c.text || '')).join('<hr>');
           detail.innerHTML = '<div class="tree-leaf-md md">' + (html || '（无正文）') + '</div>';
+          renderMathIn(detail);                    // 结构正文里若有 $..$ LaTeX → 公式
           loaded = true;
         }catch(e){ detail.innerHTML = '<p class="tree-leaf-err">加载失败</p>'; }
       });

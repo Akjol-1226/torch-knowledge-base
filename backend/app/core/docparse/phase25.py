@@ -8,13 +8,11 @@ the boundary region to an LLM (qwen3.7-max) for re-alignment, and splices the
 result back. Everything else is left untouched. A faithfulness guard rejects any
 repair that invents cell text or changes the column count.
 
-[torch 改动] 与上游不同：不把续表行搬到上一页、也不插页标记，而是**在续表自己那页就地
-对齐**（补回被丢的空列、删掉被误当表头的行/多余分隔行）。理由：本 fork 的 postprocess 是
-一整套"按页标记切块、逐页补页眉/改标题"的 pass（上游没有），若把续表行搬成上一页内容、或
-在表格行间插页标记，会让那截行被逐页 pass 当成新页处理（如把工序页眉注入到表格中间，反而
-把表劈开）。就地修列则：续表行留在原页 → pagemap 页码归属天然正确（溯源不丢）；与上游的
-"补页眉(inject_running_section_headers)"互补而非冲突——它给该页补 `## 工序`，本 pass 把其下
-那截表的列修对。参照列结构仍取自上一页表尾。
+与上游一致：把续表行**合并到上一页表格末尾**，跨页表因此变成一张完整、可渲染的 Markdown
+表格。被并的续表行会归属上一页（那几行页码溯源略偏，是可接受的取舍——它们本就属于从上一页
+开始的那张表）。注意这与"裸续表行另起一段"不同：裸数据行无表头/分隔行 Markdown 渲染不出表格。
+（曾试过"就地修列 + 插页标记/补表头"以保页码，但与本 fork 的 postprocess 逐页 pass 冲突或产生
+重复表头，最终回到上游 splice 的最小偏离做法。）
 """
 from __future__ import annotations
 
@@ -200,7 +198,7 @@ _MARKER_SPLIT_RE = re.compile(r'(<!-- page: \d+ -->)')
 
 
 def repair_format_with_llm(raw: str) -> str:
-    """Phase 2.5 入口：定点修复跨页续表断列/拆表（就地修列，不搬页、不插标记）。原文其余部分不动。"""
+    """Phase 2.5 入口：定点修复跨页续表断列/拆表（合并到上一页表尾，与上游一致）。原文其余部分不动。"""
     config = get_config()
     if not getattr(config, 'enable_phase25', False):
         return raw
@@ -211,12 +209,20 @@ def repair_format_with_llm(raw: str) -> str:
     if len(content_indices) < 2:
         return raw
 
+    # 当某页正文整段是续表、被并入上一页后清空时，记录重定向：
+    # 后续边界应继续把内容并到真正承载表格的那一页（支持 3+ 页跨页表）。
+    redirect: dict[int, int] = {}
+
+    def _anchor(idx: int) -> int:
+        while idx in redirect:
+            idx = redirect[idx]
+        return idx
+
     repaired = 0
     for a, b in zip(content_indices[:-1], content_indices[1:]):
         try:
-            # prev 取紧邻的上一页内容块。多页跨表时，上一页若已被本 pass 就地修过，其表尾即对齐后的
-            # 行 → 作为本页参照仍正确（无需 redirect：行始终留在原页，前一页内容块不会被掏空）。
-            prev_content = parts[a]
+            prev_idx = _anchor(a)
+            prev_content = parts[prev_idx]
             curr_content = parts[b]
             prev_body = prev_content.strip('\n')
             curr_body = curr_content.strip('\n')
@@ -249,17 +255,18 @@ def repair_format_with_llm(raw: str) -> str:
                 logger.warning('Phase 2.5: 行数/单元格文本不匹配，跳过本边界')
                 continue
 
-            # [torch 改动] 就地修列：把本页那截错位续表替换为对齐后的行（去表头/分隔行、补空列），
-            # 行留在原页 → pagemap 页码归属不变、不与 postprocess 逐页 pass 冲突。其余正文接其后。
-            new_curr_body = '\n'.join(rows)
-            if curr_remaining:
-                new_curr_body += '\n' + curr_remaining
-            parts[b] = _rewrap(curr_content, new_curr_body)
+            # 合并：把对齐后的续表行接到上一页表格末尾 → 跨页表变成一张完整、可渲染的表
+            # （与上游一致）。被并的续表行因此归属上一页（那几行页码溯源略偏，可接受的取舍）。
+            new_prev_body = prev_body + '\n' + '\n'.join(rows)
+            parts[prev_idx] = _rewrap(prev_content, new_prev_body)
+            parts[b] = _rewrap(curr_content, curr_remaining)
+            if not curr_remaining.strip():
+                redirect[b] = prev_idx  # b 被掏空，后续内容继续并到 prev_idx
             repaired += 1
         except Exception as exc:
             logger.warning('Phase 2.5: 边界修复失败，保留原样: %s', exc)
             continue
 
     if repaired:
-        logger.info('Phase 2.5: 就地修复了 %d 处跨页续表', repaired)
+        logger.info('Phase 2.5: 合并了 %d 处跨页续表', repaired)
     return ''.join(parts)

@@ -106,12 +106,21 @@ def get_tree(doc_id: str) -> dict | None:
             summary = next(
                 (w.get("summary") for w in group if (w.get("summary") or "").strip()), ""
             )
+            # 该节点自身是否有正文（去掉标题行/空行后仍有内容）。即使它有子节点，前端也据此
+            # 让点出自己的正文——否则像开头「设计开发记录」那种"正文是目录表 + 又有子节点"的
+            # 章节，正文(目录)会被埋掉只显示子节点。
+            own = "\n".join((w.get("text") or "") for w in group)
+            has_text = any(
+                s and not re.match(r"#{1,6}\s", s)
+                for s in (ln.strip() for ln in own.split("\n"))
+            )
             out.append({
                 "id": f"{doc_id}:{first.get('node_id', '')}",
                 "title": first.get("title", ""),
                 "page": page,
                 "summary": summary or "",
                 "windows": len(group),  # 合并了几个分页窗口（前端可标注"·N 段"）
+                "has_text": has_text,
                 "children": prune(merged_children),
             })
         return out
