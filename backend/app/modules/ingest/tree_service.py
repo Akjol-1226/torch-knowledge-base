@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.core.fsutil import write_json_atomic
+from app.core.fsutil import write_json_atomic, write_text_atomic
 from app.core.logging import get_logger
 from app.core.retrieval import VectorIndex, build_index, get_embed_client, iter_nodes
 from app.modules.ingest.catalog import build_card, make_doc_id
@@ -221,6 +221,135 @@ def _resolve_doc_id(ws: Path, doc_name: str, md_path: Path, rel: Path) -> str:
         ).hexdigest()[:4]
         return f"{base}_{suffix}"
     return base
+
+
+def build_reparse_candidate(
+    md_path: str | Path,
+    *,
+    doc_id: str,
+    kb: str,
+    final_md_path: str | Path,
+) -> dict:
+    """Build a workspace document from a temporary md without touching live data."""
+    settings = get_settings()
+    settings.apply_litellm_env()
+    md_path = Path(md_path).resolve()
+    final_md_path = Path(final_md_path).resolve()
+    tree = build_tree(str(md_path), model=settings.index_model)
+    annotate_pages(md_path, tree["structure"])
+    return {
+        "id": doc_id,
+        "type": "md",
+        "kb": kb,
+        "path": str(final_md_path),
+        "doc_name": tree["doc_name"],
+        "doc_description": tree.get("doc_description", ""),
+        "line_count": tree.get("line_count", 0),
+        "structure": tree["structure"],
+    }
+
+
+def _snapshot(path: Path) -> bytes | None:
+    return path.read_bytes() if path.exists() else None
+
+
+def _restore(path: Path, data: bytes | None) -> None:
+    if data is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _snapshot_dir(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    files: dict[str, bytes] = {}
+    dirs: set[str] = set()
+    for p in path.rglob("*"):
+        rel = str(p.relative_to(path))
+        if p.is_dir():
+            dirs.add(rel)
+        elif p.is_file():
+            files[rel] = p.read_bytes()
+    return {"dirs": dirs, "files": files}
+
+
+def _restore_dir(path: Path, snapshot: dict | None) -> None:
+    import shutil
+
+    if snapshot is None:
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+    for rel in snapshot["dirs"]:
+        (path / rel).mkdir(parents=True, exist_ok=True)
+    for rel, data in snapshot["files"].items():
+        target = path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+
+def _replace_sidecar(src: Path, dst: Path) -> None:
+    if src.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+    else:
+        dst.unlink(missing_ok=True)
+
+
+def commit_reparse_candidate(
+    doc: dict,
+    md_text: str,
+    *,
+    tmp_pagemap: str | Path | None = None,
+    tmp_ocr: str | Path | None = None,
+) -> dict:
+    """Publish a validated reparse candidate and rebuild indexes.
+
+    If commit or rebuild fails, restore the previous live md/sidecars/workspace doc.
+    """
+    with INDEX_LOCK:
+        settings = get_settings()
+        md_path = Path(doc["path"])
+        ws_path = settings.data_dir / "workspace" / f"{doc['id']}.json"
+        pagemap_path = Path(str(md_path) + ".pagemap.json")
+        ocr_path = Path(str(md_path) + ".ocr.json")
+
+        snapshots = {
+            md_path: _snapshot(md_path),
+            pagemap_path: _snapshot(pagemap_path),
+            ocr_path: _snapshot(ocr_path),
+            ws_path: _snapshot(ws_path),
+            settings.data_dir / "catalog" / "document_catalog.json": _snapshot(
+                settings.data_dir / "catalog" / "document_catalog.json"
+            ),
+            settings.data_dir / "workspace" / "_meta.json": _snapshot(
+                settings.data_dir / "workspace" / "_meta.json"
+            ),
+            settings.data_dir / "domain_dict_auto.txt": _snapshot(
+                settings.data_dir / "domain_dict_auto.txt"
+            ),
+        }
+        indexes_snapshot = _snapshot_dir(settings.data_dir / "indexes")
+        try:
+            write_text_atomic(md_path, md_text)
+            if tmp_pagemap is not None:
+                _replace_sidecar(Path(tmp_pagemap), pagemap_path)
+            if tmp_ocr is not None and Path(tmp_ocr).exists():
+                _replace_sidecar(Path(tmp_ocr), ocr_path)
+            else:
+                ocr_path.unlink(missing_ok=True)
+            write_json_atomic(ws_path, doc, indent=2)
+            result = rebuild_from_workspace()
+            log.info("reparse_committed", doc_id=doc["id"], doc_name=doc.get("doc_name"))
+            return result
+        except BaseException:
+            for path, data in snapshots.items():
+                _restore(path, data)
+            _restore_dir(settings.data_dir / "indexes", indexes_snapshot)
+            raise
 
 
 def ingest_one(md_path) -> dict:

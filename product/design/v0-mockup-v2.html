@@ -661,6 +661,7 @@
           <p id="tree-modal-sub" class="text-[11px] text-slate-400 mt-0.5"></p>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
+          <button id="tree-reparse" class="btn-primary !py-1 !px-2.5 text-[11px]" title="用原 PDF 重新跑完整入库流程">重新解析</button>
           <button id="tree-expand-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">展开全部</button>
           <button id="tree-collapse-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">收起全部</button>
           <button class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-[rgba(28,24,56,0.05)] flex items-center justify-center transition" data-tree-close title="关闭">
@@ -1776,7 +1777,46 @@
 
     // ── 文档结构树（接 /ingest/document/{id}/tree）──
     const treeModal = document.getElementById('tree-modal');
-    function closeTreeModal(){ if(treeModal) treeModal.classList.add('hidden'); }
+    let currentTreeDocId = null;
+    let currentTreeDocName = '';
+    let currentTreeHasPdf = null;
+    let treeOpenSeq = 0;
+    const treeReparseSubmittedDocs = new Set();
+    function isTreeModalOpen(){ return !!treeModal && !treeModal.classList.contains('hidden'); }
+    function closeTreeModal(){
+      if(treeModal) treeModal.classList.add('hidden');
+      treeOpenSeq += 1;
+      currentTreeDocId = null;
+      currentTreeDocName = '';
+      currentTreeHasPdf = null;
+      setTreeReparseState(null);
+    }
+    function setTreeReparseState(hasPdf, message){
+      const btn = document.getElementById('tree-reparse');
+      if(!btn) return;
+      const submitted = currentTreeDocId && treeReparseSubmittedDocs.has(currentTreeDocId);
+      const loading = message === 'loading';
+      const unknown = hasPdf == null;
+      const enabled = hasPdf === true && !submitted && !loading;
+      btn.disabled = !enabled;
+      btn.classList.toggle('opacity-40', !enabled);
+      btn.classList.toggle('cursor-not-allowed', !enabled);
+      btn.textContent = loading ? '提交中…' : (submitted ? '已提交' : '重新解析');
+      if(loading) btn.title = '正在提交重新解析任务';
+      else if(submitted) btn.title = '已提交重新解析任务，请等待后台处理完成';
+      else if(enabled) btn.title = '用原 PDF 重新跑完整入库流程';
+      else if(unknown) btn.title = '无法确认原 PDF 状态：接口版本未更新/请重启后端';
+      else btn.title = '该文档没有原 PDF，不能重新解析';
+    }
+    async function resolveTreeHasPdf(docId, treeData){
+      if(Object.prototype.hasOwnProperty.call(treeData || {}, 'has_pdf')) return treeData.has_pdf === true;
+      try{
+        const d = await (await fetch(API_BASE + '/ingest/document/' + encodeURIComponent(docId))).json();
+        if(d.detail || d.error) return null;
+        if(Object.prototype.hasOwnProperty.call(d || {}, 'has_pdf')) return d.has_pdf === true;
+      }catch(e){ /* 保持未知，交给调用方显示版本提示 */ }
+      return null;
+    }
     function countTreeNodes(nodes){ let c = 0; (nodes || []).forEach(n => { c += 1 + countTreeNodes(n.children); }); return c; }
     // 递归建可折叠 DOM。depth=0 是章节（带序号、加粗）；其下是附表/子项（📎、淡化）。
     // 默认全部收起 → 初始就是干净的章节清单；摘要走 row 的 title 悬停浮层。
@@ -1844,6 +1884,11 @@
     }
     async function openDocTree(docId){
       if(!treeModal) return;
+      const requestSeq = ++treeOpenSeq;
+      currentTreeDocId = docId;
+      currentTreeDocName = '';
+      currentTreeHasPdf = null;
+      setTreeReparseState(null);
       treeModal.classList.remove('hidden');
       const box = document.getElementById('tree-view');
       box.innerHTML = '<p class="text-slate-400">加载中…</p>';
@@ -1851,21 +1896,72 @@
       document.getElementById('tree-modal-sub').textContent = '';
       try{
         const d = await (await fetch(API_BASE + '/ingest/document/' + encodeURIComponent(docId) + '/tree')).json();
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
         if(d.detail) throw new Error(d.detail);
         // 去掉与文档名重复的单一根节点：直接把它的章节作为顶层展示，少一层多余缩进
         let roots = d.nodes || [];
         if(roots.length === 1 && (roots[0].title || '').trim() === (d.doc_name || '').trim()){
           roots = roots[0].children || [];
         }
+        const hasPdf = await resolveTreeHasPdf(docId, d);
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
+        currentTreeDocName = d.doc_name || docId;
+        currentTreeHasPdf = hasPdf;
+        setTreeReparseState(currentTreeHasPdf);
         document.getElementById('tree-modal-title').textContent = d.doc_name || '文档结构';
-        document.getElementById('tree-modal-sub').textContent = (d.kb || 'default') + ' · ' + roots.length + ' 章 · ' + countTreeNodes(roots) + ' 节点';
+        const pdfText = hasPdf === true ? '' : (hasPdf === false ? ' · 无原 PDF' : ' · 原 PDF 状态未知（接口版本未更新/请重启后端）');
+        const submittedText = treeReparseSubmittedDocs.has(docId) ? ' · 重新解析已提交' : '';
+        document.getElementById('tree-modal-sub').textContent = (d.kb || 'default') + ' · ' + roots.length + ' 章 · ' + countTreeNodes(roots) + ' 节点' + pdfText + submittedText;
         box.innerHTML = '';
         if(!roots.length){ box.innerHTML = '<p class="text-slate-400 py-8 text-center">该文档无结构节点</p>'; return; }
         roots.forEach((n, i) => box.appendChild(makeTreeNode(n, 0, i + 1)));
-      }catch(err){ box.innerHTML = '<p class="text-red-500">加载失败：' + escapeHtml(err.message) + '</p>'; }
+      }catch(err){
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
+        box.innerHTML = '<p class="text-red-500">加载失败：' + escapeHtml(err.message) + '</p>';
+      }
+    }
+    async function reparseCurrentTreeDoc(){
+      const docId = currentTreeDocId;
+      const docName = currentTreeDocName || docId;
+      const requestSeq = treeOpenSeq;
+      if(!isTreeModalOpen() || !docId || currentTreeHasPdf !== true || treeReparseSubmittedDocs.has(docId)){
+        alert(currentTreeHasPdf == null ? '无法确认原 PDF 状态：接口版本未更新/请重启后端。' : '该文档当前不能重新解析。');
+        return;
+      }
+      if(!confirm('重新解析「' + docName + '」？旧文档会在新任务完成前继续可用。')) return;
+      const btn = document.getElementById('tree-reparse');
+      btn.disabled = true;
+      setTreeReparseState(true, 'loading');
+      try{
+        const res = await fetch(API_BASE + '/ingest/document/' + encodeURIComponent(docId) + '/reparse', {method:'POST'});
+        const text = await res.text();
+        let d = {};
+        if(text){
+          try{
+            d = JSON.parse(text);
+          }catch(e){
+            if(!res.ok) throw new Error('HTTP ' + res.status + '：' + text.slice(0, 200));
+            throw new Error('接口返回非 JSON：' + text.slice(0, 200));
+          }
+        }
+        if(!res.ok) throw new Error(d.detail || d.error || ('HTTP ' + res.status + (text ? '：' + text.slice(0, 200) : '')));
+        if(d.detail || d.error) throw new Error(d.detail || d.error);
+        treeReparseSubmittedDocs.add(docId);
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId || !isTreeModalOpen()) return;
+        document.getElementById('tree-modal-sub').textContent = '已提交重新解析任务 ' + (d.task_id || '') + ' · 后台处理中';
+        setTreeReparseState(true);
+        if(confirm('已加入任务队列，是否现在查看进度？')) switchPage('kb-queue');
+      }catch(err){
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId || !isTreeModalOpen()) return;
+        alert('重新解析失败：' + err.message);
+        setTreeReparseState(currentTreeHasPdf);
+      }finally{
+        if(requestSeq === treeOpenSeq && currentTreeDocId === docId && isTreeModalOpen() && !treeReparseSubmittedDocs.has(docId)) setTreeReparseState(currentTreeHasPdf);
+      }
     }
     if(treeModal){
       treeModal.querySelectorAll('[data-tree-close]').forEach(el => el.addEventListener('click', closeTreeModal));
+      document.getElementById('tree-reparse')?.addEventListener('click', reparseCurrentTreeDoc);
       document.getElementById('tree-expand-all').addEventListener('click',
         () => document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.remove('tree-collapsed')));
       document.getElementById('tree-collapse-all').addEventListener('click',

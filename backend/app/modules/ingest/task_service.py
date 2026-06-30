@@ -11,6 +11,7 @@
 
 import json
 import os
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ RETRY_BACKOFF = [30, 120, 600]
 
 # 后台并发数（PRD §3.4 可配）；env INGEST_CONCURRENCY 覆盖，默认 3
 DEFAULT_CONCURRENCY = int(os.environ.get("INGEST_CONCURRENCY", "3"))
+_TASK_LOCK = threading.RLock()
 
 
 def _dir() -> Path:
@@ -49,7 +51,14 @@ def _path(task_id: str) -> Path:
     return _dir() / f"{safe}.json"
 
 
-def create(filename: str, kb: str) -> dict:
+def create(
+    filename: str,
+    kb: str,
+    *,
+    kind: str = "upload",
+    doc_id: str | None = None,
+    **metadata,
+) -> dict:
     """新建任务，初始 queued。"""
     d = _dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -62,11 +71,15 @@ def create(filename: str, kb: str) -> dict:
         "progress": 0,
         "error": None,
         "attempts": 0,
+        "kind": kind,
         "created_at": _now(),
         "updated_at": _now(),
     }
+    if doc_id:
+        rec["doc_id"] = doc_id
+    rec.update({k: v for k, v in metadata.items() if v is not None})
     write_json_atomic(_path(task_id), rec, indent=2)
-    log.info("task_created", task_id=task_id, filename=filename, kb=kb)
+    log.info("task_created", task_id=task_id, filename=filename, kb=kb, kind=kind)
     return rec
 
 
@@ -95,6 +108,27 @@ def list_tasks() -> list[dict]:
             continue
     out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return out
+
+
+def find_active_reparse(doc_id: str) -> dict | None:
+    """Return an unfinished reparse task for doc_id, if one exists."""
+    for rec in list_tasks():
+        if (
+            rec.get("kind") == "reparse"
+            and rec.get("doc_id") == doc_id
+            and rec.get("status") in {QUEUED, PROCESSING, NEEDS_REVIEW}
+        ):
+            return rec
+    return None
+
+
+def create_reparse(filename: str, kb: str, doc_id: str) -> tuple[dict, bool]:
+    """Create a reparse task, or return the active one for this doc."""
+    with _TASK_LOCK:
+        existing = find_active_reparse(doc_id)
+        if existing is not None:
+            return existing, False
+        return create(filename, kb, kind="reparse", doc_id=doc_id), True
 
 
 def update(task_id: str, **fields) -> dict | None:

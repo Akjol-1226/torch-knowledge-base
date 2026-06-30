@@ -5,11 +5,15 @@
 """
 
 import json
+import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.modules.ingest import task_service
 
 log = get_logger("ingest.document")
 
@@ -129,6 +133,7 @@ def get_tree(doc_id: str) -> dict | None:
         "doc_id": doc_id,
         "doc_name": doc.get("doc_name", ""),
         "kb": doc.get("kb", "default"),
+        "has_pdf": _pdf_path(doc).exists(),
         "nodes": prune(doc.get("structure", []) or []),
     }
 
@@ -146,6 +151,75 @@ def get_pdf_file(doc_id: str) -> Path | None:
         return None
     p = _pdf_path(doc)
     return p if p.exists() else None
+
+
+def create_reparse_task(doc_id: str) -> dict:
+    """为已有文档创建完整重解析任务：复用原 PDF，从 PDF→MD→审核/入库全流程重跑。
+
+    任务异步执行；旧 md/workspace 在任务完成前保持可用。若新解析结果含 notsure，进入待审区，
+    审核通过后才覆盖正式 md 和索引。
+    """
+    doc = _load(doc_id)
+    if doc is None:
+        return {"error": f"文档不存在: {doc_id}"}
+    pdf = _pdf_path(doc)
+    if not pdf.exists():
+        return {"error": "该文档无原 PDF，无法重新解析"}
+
+    kb = doc.get("kb", "default")
+    stem = Path(doc["path"]).stem
+    original_name = f"{stem}.pdf"
+
+    existing = task_service.find_active_reparse(doc_id)
+    if existing is not None:
+        return {
+            "task_id": existing["id"],
+            "status": existing["status"],
+            "document": stem,
+            "kb": existing.get("kb", kb),
+            "original_name": existing.get("filename", original_name),
+            "existing": True,
+        }
+
+    fd, tmp = tempfile.mkstemp(suffix=".pdf")
+    try:
+        try:
+            dst = os.fdopen(fd, "wb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with dst, open(pdf, "rb") as src:
+            shutil.copyfileobj(src, dst)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+    try:
+        task, created = task_service.create_reparse(original_name, kb, doc_id)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    if not created:
+        Path(tmp).unlink(missing_ok=True)
+        return {
+            "task_id": task["id"],
+            "status": task["status"],
+            "document": stem,
+            "kb": task.get("kb", kb),
+            "original_name": task.get("filename", original_name),
+            "existing": True,
+        }
+
+    return {
+        "task_id": task["id"],
+        "status": task["status"],
+        "document": stem,
+        "kb": kb,
+        "tmp_path": tmp,
+        "original_name": original_name,
+        "doc_id": doc_id,
+        "existing": False,
+    }
 
 
 def delete_document(doc_id: str) -> dict:

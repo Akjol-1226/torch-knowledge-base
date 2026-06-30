@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.modules.ingest import document_service, review_service, task_service
 from app.modules.ingest.doc_convert import SUPPORTED_UPLOAD_EXTS
+from app.modules.ingest.reparse_worker import run_reparse_task
 from app.modules.ingest.schemas import UploadResponse
 from app.modules.ingest.service import IngestService
 from app.modules.ingest.task_worker import run_ingest_task
@@ -182,6 +183,29 @@ async def download_document_pdf(doc_id: str) -> FileResponse:
     if p is None:
         raise HTTPException(status_code=404, detail="该文档无原 PDF（仅有解析后的 Markdown）")
     return FileResponse(str(p), media_type="application/pdf")
+
+
+@router.post("/document/{doc_id}/reparse")
+async def reparse_document(doc_id: str, background: BackgroundTasks) -> dict:
+    """重新解析已有文档：复用原 PDF，提交异步任务重跑完整 PDF→MD→入库流程。"""
+    rec = await run_in_threadpool(document_service.create_reparse_task, doc_id)
+    if rec.get("error"):
+        raise HTTPException(status_code=404, detail=rec["error"])
+    if rec.get("tmp_path"):
+        background.add_task(
+            run_reparse_task,
+            rec["task_id"],
+            rec["tmp_path"],
+            rec["doc_id"],
+            rec["original_name"],
+            rec["kb"],
+        )
+    return {
+        "task_id": rec["task_id"],
+        "status": rec["status"],
+        "document": rec["document"],
+        "kb": rec["kb"],
+    }
 
 
 @router.delete("/document/{doc_id}")
