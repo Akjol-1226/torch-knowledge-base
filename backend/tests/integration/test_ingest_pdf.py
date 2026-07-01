@@ -138,7 +138,7 @@ def test_reparse_document_with_pdf_creates_ingest_task(monkeypatch, tmp_path):
         tree_service,
         "build_tree",
         lambda md_path, model: {
-            "doc_name": "clean",
+            "doc_name": Path(md_path).stem,
             "doc_description": "",
             "line_count": 2,
             "structure": [],
@@ -174,6 +174,8 @@ def test_reparse_document_with_pdf_creates_ingest_task(monkeypatch, tmp_path):
     assert task["filename"] == "clean.pdf"
     assert task["kb"] == "default"
     assert (md_dir / "clean.md").read_text(encoding="utf-8") == "# clean\n重新解析后的内容"
+    doc = json.loads((ws_dir / "doc_clean.json").read_text(encoding="utf-8"))
+    assert doc["doc_name"] == "clean"
     assert not (md_dir / "clean.md.ocr.json").exists()
 
 

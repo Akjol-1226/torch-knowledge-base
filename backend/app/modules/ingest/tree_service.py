@@ -237,12 +237,15 @@ def build_reparse_candidate(
     final_md_path = Path(final_md_path).resolve()
     tree = build_tree(str(md_path), model=settings.index_model)
     annotate_pages(md_path, tree["structure"])
+    doc_name = tree["doc_name"]
+    if doc_name.startswith(("_tmp_reparse_", "_tmp_review_reparse_")):
+        doc_name = final_md_path.stem
     return {
         "id": doc_id,
         "type": "md",
         "kb": kb,
         "path": str(final_md_path),
-        "doc_name": tree["doc_name"],
+        "doc_name": doc_name,
         "doc_description": tree.get("doc_description", ""),
         "line_count": tree.get("line_count", 0),
         "structure": tree["structure"],
