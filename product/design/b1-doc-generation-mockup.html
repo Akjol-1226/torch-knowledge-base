@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>火炬电子知识库 · B-1 基于历史框架生成新文档 · Mockup</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', '"Noto Sans SC"', 'sans-serif'] },
+          colors: {
+            accent: { DEFAULT: '#8b79d4', ink: '#5b4ba3', soft: '#efeafb', line: '#ddd4f5' },
+          },
+        },
+      },
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    body {
+      --bg-base:   #f6f5f9;
+      --bg-tint:   #f1eef8;
+      --hair:      rgba(28, 24, 56, 0.07);
+    }
+    .theme-bg {
+      background:
+        radial-gradient(1100px 700px at 88% -10%, var(--bg-tint), transparent 60%),
+        var(--bg-base);
+    }
+    .glass-card { background: transparent; border: none; box-shadow: none; }
+    .glass-soft { background: rgba(255, 255, 255, 0.62); border: 1px solid var(--hair); }
+    .surface { background: rgba(255,255,255,0.5); border: 1px solid var(--hair); }
+
+    #app-sidebar { width: 17rem; border-right: 1px solid var(--hair); }
+    .nav-item { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] text-slate-600 cursor-pointer transition; }
+    .nav-item:hover { @apply text-slate-900; background: rgba(28,24,56,0.045); }
+    .nav-item.active { @apply text-accent-ink font-medium bg-accent-soft; }
+    .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-group-label { @apply text-[11px] text-slate-400 font-medium px-3 mb-1 mt-4; }
+
+    @keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-enter { animation: fade-in .35s ease-out forwards; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.10); border-radius: 10px; }
+
+    .btn-primary { @apply px-4 py-2 rounded-lg text-sm font-semibold text-white transition; background: #8b79d4; box-shadow: 0 1px 2px rgba(40,30,80,0.12); }
+    .btn-primary:hover { background: #7b68c9; }
+    .btn-primary:active { transform: translateY(0.5px); }
+    .btn-ghost { @apply px-4 py-2 rounded-lg text-sm font-medium text-slate-600 transition; background: transparent; border: 1px solid var(--hair); }
+    .btn-ghost:hover { background: rgba(28,24,56,0.04); color: #1e293b; }
+    .input-base { @apply w-full rounded-lg px-4 py-2.5 text-sm text-slate-700 outline-none; background: rgba(255,255,255,0.85); border: 1px solid var(--hair); transition: all .15s ease; }
+    .input-base:focus { border-color: #b9aae8; box-shadow: 0 0 0 3px rgba(139,121,212,0.18); background: #fff; }
+    textarea.input-base { @apply leading-relaxed; resize: none; }
+
+    .chip { @apply inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); color: #475569; }
+    .chip-purple { background: rgba(224,195,252,0.45); border-color: rgba(224,195,252,0.9); color: #6b46c1; }
+    .chip-amber  { background: rgba(252,232,195,0.6);  border-color: rgba(252,232,195,1); color: #b45309; }
+    .chip-gray   { background: rgba(226,232,240,0.6);  border-color: rgba(226,232,240,1); color: #475569; }
+    .tile-purple { background: #efeafb; color: #5b4ba3; }
+    .tile-mint   { background: #e2f7ef; color: #0d8a66; }
+    .tile-amber  { background: #fbf1dc; color: #b07410; }
+
+    .view-pane.hidden { display: none !important; }
+    .view-pane { min-width: 0; }
+
+    .md h2 { font-weight: 600; color: #1e293b; margin: 14px 0 6px; font-size: 15px; line-height: 1.3; }
+    .md p { margin: 6px 0; line-height: 1.7; font-size: 13px; color: #334155; }
+    .md table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+    .md th, .md td { border: 1px solid var(--hair); padding: 5px 8px; text-align: left; vertical-align: top; }
+    .md th { background: rgba(255,255,255,0.6); font-weight: 600; }
+
+    .b1-ai   { display: flex; gap: 10px; }
+    .b1-ai .avatar { width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .b1-ai .bubble { font-size: 13px; line-height: 1.7; color: #334155; }
+    .b1-user { display: flex; justify-content: flex-end; }
+    .b1-user .bubble { background: #efeafb; color: #3f3663; font-size: 13px; line-height: 1.7; padding: 9px 14px; border-radius: 14px 14px 4px 14px; max-width: 80%; }
+
+    .param-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 11px; border-radius: 9px; background: #fbfaff; border: 1px solid rgba(28,24,56,.07); font-size: 12.5px; }
+    .param-row + .param-row { margin-top: 5px; }
+    .param-k { color: #64748b; }
+    .param-v { font-weight: 600; color: #1e293b; font-variant-numeric: tabular-nums; }
+
+    .plan-card { border: 1px solid #ddd4f5; border-radius: 16px; background: #fff; overflow: hidden; box-shadow: 0 10px 30px -18px rgba(40,30,80,0.25); }
+    .plan-head { padding: 12px 15px; background: linear-gradient(180deg,#f7f4ff,#fff); border-bottom: 1px solid rgba(28,24,56,.06); }
+    .plan-item { display: flex; gap: 10px; padding: 11px 15px; border-top: 1px solid rgba(28,24,56,.05); transition: background .12s; }
+    .plan-item:hover { background: #fbfaff; }
+    .plan-item.off { opacity: .45; }
+    .plan-chk { width: 17px; height: 17px; border-radius: 5px; border: 1.5px solid #c9bdf0; flex-shrink: 0; margin-top: 2px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .12s; }
+    .plan-chk.on { background: #8b79d4; border-color: #8b79d4; }
+    .plan-loc { font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+    .plan-chg { font-size: 12.5px; color: #334155; line-height: 1.5; }
+    .plan-chg .old { color: #b91c1c; text-decoration: line-through; text-decoration-color: rgba(185,28,28,.5); }
+    .plan-chg .new { color: #6d28d9; font-weight: 600; }
+    .src-tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+    .src-user { background: #efeafb; color: #6b46c1; border: 1px solid #ddd4f5; }
+    .src-calc { background: #fbf1dc; color: #b07410; border: 1px solid #f0dcb0; }
+
+    mark.chg { background: #fff3b0; color: inherit; padding: 0 3px; border-radius: 3px; box-shadow: inset 0 -1px 0 rgba(217,119,6,.4); }
+    mark.chg-calc { background: #fde9c8; color: inherit; padding: 0 3px; border-radius: 3px; border-bottom: 2px dashed #d97706; }
+    .mod-block { position: relative; border-radius: 10px; padding: 4px 10px; margin: 4px -10px; transition: background .15s; }
+    .mod-block.spot { background: rgba(255,243,176,.28); }
+    .paste-tag { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: #8478a8; background: #f6f3ff; border: 1px solid #e4dcf7; border-radius: 999px; padding: 3px 6px 3px 11px; }
+    .paste-tag .loc { font-weight: 600; color: #5b4ba3; }
+    .paste-copy { font-size: 10.5px; color: #6d5bd0; background: #fff; border: 1px solid #e4dcf7; border-radius: 999px; padding: 2px 9px; cursor: pointer; transition: background .12s; }
+    .paste-copy:hover { background: #efeafb; }
+    .calc-note { font-size: 10.5px; color: #b07410; margin-left: 6px; }
+
+    .tpl-card { border: 1px solid var(--hair); border-radius: 16px; background: rgba(255,255,255,.62); padding: 18px; cursor: pointer; transition: all .16s; }
+    .tpl-card:hover { border-color: #c9bdf0; box-shadow: 0 12px 30px -18px rgba(40,30,80,0.3); transform: translateY(-2px); }
+
+    #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; background: #2a2440; color: #fff; font-size: 12.5px; padding: 9px 18px; border-radius: 999px; transition: all .25s ease; z-index: 60; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+
+<body class="min-h-screen m-0 p-0 overflow-hidden font-sans text-slate-800">
+  <div class="theme-bg fixed inset-0 -z-10"></div>
+
+  <main class="flex h-screen w-full overflow-hidden">
+
+    <aside id="app-sidebar" class="flex-shrink-0 h-full flex flex-col px-3 py-4">
+      <div class="flex items-center gap-2 px-1 mb-5">
+        <span class="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-sm font-bold leading-none flex-shrink-0">炬</span>
+        <span class="text-[15px] font-semibold text-slate-800 whitespace-nowrap flex-1">研发知识库</span>
+      </div>
+
+      <a class="nav-item" title="发起新对话">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="font-medium">发起新对话</span>
+      </a>
+      <a class="nav-item active" title="基于历史框架生成新文档">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6M9 15h6"/></svg>
+        <span class="font-medium">生成文档</span>
+      </a>
+
+      <div class="nav-group-label">知识库</div>
+      <a class="nav-item" title="上传">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <span>上传文档</span>
+      </a>
+      <a class="nav-item" title="任务队列">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <span>任务队列</span>
+      </a>
+      <a class="nav-item" title="待 review">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+        <span>待 review</span>
+        <span class="ml-auto chip chip-amber !px-1.5 !py-0 text-[10px]">3</span>
+      </a>
+      <a class="nav-item" title="知识库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20M4 19.5A2.5 2.5 0 006.5 22H20V2H6.5A2.5 2.5 0 004 4.5v15z"/></svg>
+        <span>知识库</span>
+      </a>
+
+      <div class="mt-auto">
+        <div class="flex items-center gap-2 px-2 py-2 mt-2 border-t pt-3" style="border-color: var(--hair);">
+          <div class="w-8 h-8 rounded-full tile-purple flex items-center justify-center text-xs font-bold flex-shrink-0">工</div>
+          <div class="leading-tight overflow-hidden flex-1">
+            <div class="text-[13px] font-medium text-slate-700">工艺组 · 张工</div>
+            <div class="text-[11px] text-slate-400">研发工程师</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <section id="workspace" class="flex-1 h-full flex flex-col overflow-hidden px-6 py-5">
+      <div class="flex items-center gap-3 mb-4">
+        <h1 class="text-lg font-semibold text-slate-800">生成文档</h1>
+        <span class="chip chip-gray">B-1 · 基于历史框架的新文档生成</span>
+        <button id="restart" class="ml-auto btn-ghost !py-1.5 !px-3 text-xs hidden">重新选择模板</button>
+      </div>
+
+      <div class="flex-1 overflow-hidden">
+
+        <section id="view-pick" class="view-pane h-full overflow-y-auto custom-scrollbar animate-enter">
+          <div class="max-w-3xl">
+            <p class="text-sm text-slate-500 mb-1">选一份最接近的历史文档作蓝本，AI 会沿用它的章节框架，只替换你指定的关键参数，生成新文档初稿。</p>
+            <p class="text-xs text-slate-400 mb-6">初稿仅供参考、必须经研发人员审核；可导出 Markdown / 结构化 JSON（不生成 .docx，粘贴回 Word 由 B-3 定位辅助）。</p>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div class="tpl-card" onclick="pickTpl()">
+                <div class="flex items-start gap-3">
+                  <div class="w-10 h-10 rounded-xl tile-purple flex items-center justify-center flex-shrink-0">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-semibold text-slate-800">G03 涂布工序工艺规程</div>
+                    <div class="text-xs text-slate-400 mt-0.5">工艺规程 · 0805 规格 · 7 章 22 节</div>
+                    <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">多层片式陶瓷电容器涂布工序的目的、适用范围、工艺流程、工序参数与质量控制要求。</div>
+                  </div>
+                </div>
+                <div class="mt-3 flex items-center gap-1.5">
+                  <span class="chip chip-purple">工艺规程</span>
+                  <span class="chip chip-gray">最近被引用 12 次</span>
+                </div>
+              </div>
+
+              <div class="tpl-card" onclick="pickTpl()">
+                <div class="flex items-start gap-3">
+                  <div class="w-10 h-10 rounded-xl tile-mint flex items-center justify-center flex-shrink-0">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-semibold text-slate-800">MLCC 出厂检验规范</div>
+                    <div class="text-xs text-slate-400 mt-0.5">检验规范 · 通用 · 5 章 16 节</div>
+                    <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">外观、电性能、可靠性抽检项目与判定标准、抽样方案与记录表格。</div>
+                  </div>
+                </div>
+                <div class="mt-3 flex items-center gap-1.5">
+                  <span class="chip chip-gray">检验规范</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 glass-soft rounded-2xl p-4 flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg tile-amber flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              </div>
+              <div class="flex-1">
+                <div class="text-[13px] font-medium text-slate-700">上传一份参考文档作蓝本</div>
+                <div class="text-[11px] text-slate-400">若知识库里没有合适的历史文档，可临时上传 PDF/Word 作模板</div>
+              </div>
+              <button class="btn-ghost !py-1.5 !px-3 text-xs" onclick="toast('示例原型：请直接点上方模板卡进入')">选择文件</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-work" class="view-pane hidden h-full flex gap-4 animate-enter">
+
+          <section class="flex-1 glass-card rounded-3xl flex flex-col overflow-hidden min-w-0" style="max-width: 46%;">
+            <div class="px-5 pt-4 pb-2 flex items-center gap-2 flex-shrink-0 border-b" style="border-color: var(--hair);">
+              <span class="text-sm font-medium text-slate-700">蓝本：G03 涂布工序工艺规程</span>
+              <span class="chip chip-purple !py-0 text-[10px]">plan 模式</span>
+            </div>
+
+            <div id="b1-stream" class="flex-1 overflow-y-auto custom-scrollbar px-5 py-5 space-y-5"></div>
+
+            <div class="px-5 py-4 bg-white/20 border-t" style="border-color: var(--hair);">
+              <div class="relative">
+                <textarea id="b1-input" class="input-base !pr-24 !py-3.5 max-h-32" rows="1" placeholder="说说你要做的新文档，例如「做 1206 规格、涂布厚度改 15μm」…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();onSend();}"></textarea>
+                <button class="btn-primary absolute right-2.5 top-2" onclick="onSend()">发送</button>
+              </div>
+              <p class="text-[10px] text-center text-slate-400 mt-2.5 tracking-wide">AI 会先给改动清单，你确认后再生成 —— 所有改动均可核对</p>
+            </div>
+          </section>
+
+          <aside class="flex-1 surface rounded-3xl flex flex-col overflow-hidden min-w-0">
+            <div class="px-5 py-3.5 border-b flex items-center justify-between flex-shrink-0" style="border-color: var(--hair);">
+              <div class="flex items-center gap-2 min-w-0">
+                <h3 id="doc-title" class="text-sm font-semibold text-slate-800 truncate">模板预览</h3>
+                <span id="doc-badge" class="chip chip-gray !py-0 text-[10px]">未生成</span>
+              </div>
+              <div id="doc-actions" class="items-center gap-2 hidden">
+                <button class="btn-ghost !py-1.5 !px-3 text-xs" onclick="copyDocText()">复制全文</button>
+              </div>
+            </div>
+            <div id="doc-body" class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5"></div>
+          </aside>
+        </section>
+
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    const $ = (s, r=document) => r.querySelector(s);
+    function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2000); }
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    let sent = false;
+
+    function pickTpl(){
+      $('#view-pick').classList.add('hidden');
+      $('#view-work').classList.remove('hidden');
+      $('#restart').classList.remove('hidden');
+      $('#b1-stream').innerHTML = '';
+      $('#b1-input').value = '';
+      sent = false;
+      renderDoc(false);
+      phaseRead();
+    }
+    $('#restart').onclick = () => {
+      $('#view-work').classList.add('hidden');
+      $('#view-pick').classList.remove('hidden');
+      $('#restart').classList.add('hidden');
+      $('#b1-stream').innerHTML = '';
+      sent = false;
+    };
+
+    const PLAN = [
+      { on:true, loc:'第 2 章 · 适用范围', old:'0805', neu:'1206', src:'user' },
+      { on:true, loc:'附表 1 · 产品规格', old:'2.0×1.25 mm', neu:'3.2×1.6 mm', src:'calc', note:'按 1206 封装标准推算' },
+      { on:true, loc:'附表 1 · 产品规格', old:'额定电容 220 pF', neu:'额定电容 470 pF', src:'calc', note:'按面积/介质重算' },
+      { on:true, loc:'第 5 章 · 涂布工序', old:'涂布厚度 12±2 μm', neu:'15±2 μm', src:'user' },
+      { on:true, loc:'全文 · 型号标识', old:'TCC-0805-X', neu:'TCC-1206-X', src:'user' },
+    ];
+
+    // ---- 对话流基础件 ----
+    function scrollBottom(){ const s = $('#b1-stream'); s.scrollTop = s.scrollHeight; }
+    function aiBubble(html){
+      const d = document.createElement('div');
+      d.className = 'b1-ai animate-enter';
+      d.innerHTML = `<div class="avatar tile-purple">炬</div><div class="bubble">${html}</div>`;
+      $('#b1-stream').appendChild(d); scrollBottom();
+      return d.querySelector('.bubble');
+    }
+    function userBubble(text){
+      const d = document.createElement('div');
+      d.className = 'b1-user animate-enter';
+      d.innerHTML = `<div class="bubble"></div>`;
+      d.querySelector('.bubble').textContent = text;
+      $('#b1-stream').appendChild(d); scrollBottom();
+    }
+    // 逐条把 spinner 变成对勾，模拟 Agent 真实工作过程
+    async function playWork(title, steps){
+      const bubble = aiBubble(`<div class="work"><div class="work-title"><span class="dot"></span>${title}</div><div class="steps"></div></div>`);
+      const box = bubble.querySelector('.steps');
+      for(const s of steps){
+        const row = document.createElement('div');
+        row.className = 'step pending';
+        row.innerHTML = `<span class="ic"><span class="spinner"></span></span><span class="tx">${s}</span>`;
+        box.appendChild(row); scrollBottom();
+        await sleep(620);
+        row.classList.remove('pending'); row.classList.add('done');
+        row.querySelector('.ic').innerHTML = '<svg class="chk" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>';
+      }
+      return bubble;
+    }
+
+    // ---- 阶段 1：点模板后，Agent 先自己读一遍蓝本 ----
+    async function phaseRead(){
+      await sleep(300);
+      await playWork('阅读蓝本 · G03 涂布工序工艺规程', [
+        '载入章节树：7 章 22 节',
+        '逐节读摘要：适用范围 / 工艺流程 / 涂布工序 / 质量控制…',
+        '归纳文档骨架与适用对象',
+      ]);
+      await sleep(150);
+      aiBubble(`我通读了《G03 涂布工序工艺规程》——它规定了 <b>0805 规格</b>多层片式陶瓷电容器涂布工序的目的、适用范围、工艺流程、工序参数与质量控制要求，<b>共 7 章 22 节</b>。<br>
+        我会原样沿用它的章节框架。<b>你想基于它做一份什么新文档？</b>比如换一种产品规格、或调整某道工序——说个大概就行。到时我会顺着你的需求去精读相关章节的原文、把牵连的参数逐条算好，列成一份改动清单给你确认。`);
+      const ta = $('#b1-input');
+      ta.value = '做 1206 规格的新产品，涂布厚度改成 15±2μm，型号跟着改，其它沿用。相关的尺寸、电容值你按规格重算一下。';
+      ta.focus();
+      toast('已替你预填一句需求，点「发送」体验');
+    }
+
+    // ---- 阶段 2：用户发需求后，Agent 深读相关章节 + 调计算工具 → 出改动清单 ----
+    async function onSend(){
+      const ta = $('#b1-input');
+      const text = ta.value.trim();
+      if(!text){ toast('先说一句：新产品哪些参数变了'); return; }
+      if(sent){ toast('示例原型：本 demo 演示到「生成初稿」为止'); return; }
+      sent = true;
+      userBubble(text);
+      ta.value = '';
+      await sleep(200);
+      await playWork('分析需求 · 深读相关章节', [
+        '解析需求：规格 0805→1206、厚度→15±2μm、型号联动',
+        '定位受影响章节：第 2 章 · 附表 1 · 第 5 章 · 全文型号',
+        '读附表 1 原文：外形尺寸 2.0×1.25mm / 额定电容 220pF',
+        '调用计算工具：按 1206 封装标准重算尺寸与电容值 <span class="tool-badge">calc</span>',
+        '汇总改动，生成清单',
+      ]);
+      await sleep(150);
+      aiBubble(`规格 0805→1206 会牵动物理尺寸和电容值，我用计算工具重算了。下面是<b>完整改动清单</b>，你核对后我再生成 —— 取消勾选的不改：
+        <div class="plan-card mt-3" id="plan-card"></div>
+        <div class="flex items-center gap-2 mt-3">
+          <button class="btn-primary !py-2 !px-4 text-[13px]" onclick="generate()">确认生成初稿</button>
+          <button class="btn-ghost !py-2 !px-3 text-[13px]" onclick="toast('可在下方输入框继续调整')">继续调整</button>
+        </div>`);
+      renderPlan();
+    }
+
+    function renderPlan(){
+      const c = $('#plan-card');
+      c.innerHTML = `<div class="plan-head text-[12px] text-slate-500">共 <b class="text-slate-700">${PLAN.filter(p=>p.on).length}</b> 处改动 · <span class="src-tag src-user">你指定</span> 直接替换 · <span class="src-tag src-calc">AI推理</span> 需你重点核对</div>` +
+        PLAN.map((p,i)=>`
+          <div class="plan-item ${p.on?'':'off'}" data-i="${i}">
+            <div class="plan-chk ${p.on?'on':''}" onclick="togglePlan(${i})">
+              ${p.on?'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>':''}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="plan-loc">${p.loc}</div>
+              <div class="plan-chg"><span class="old">${p.old}</span> → <span class="new">${p.neu}</span>
+                <span class="src-tag ${p.src==='user'?'src-user':'src-calc'}">${p.src==='user'?'你指定':'AI推理'}</span>
+              </div>
+              ${p.note?`<div class="calc-note">${p.note}</div>`:''}
+            </div>
+          </div>`).join('');
+    }
+    function togglePlan(i){ PLAN[i].on = !PLAN[i].on; renderPlan(); if($('#doc-badge').textContent!=='未生成') renderDoc(true); }
+
+    function renderDoc(generated){
+      const on = i => PLAN[i].on;
+      const body = $('#doc-body');
+      if(!generated){
+        $('#doc-title').textContent = '模板预览 · G03 涂布工序工艺规程';
+        $('#doc-badge').textContent = '未生成'; $('#doc-badge').className = 'chip chip-gray !py-0 text-[10px]';
+        $('#doc-actions').classList.add('hidden');
+        body.innerHTML = `<div class="md" style="opacity:.72">
+          <h2>2 适用范围</h2><p>本规程适用于 0805 规格多层片式陶瓷电容器涂布工序。</p>
+          <h2>附表 1 产品规格</h2>
+          <table><tr><th>项目</th><th>参数</th></tr><tr><td>外形尺寸</td><td>2.0×1.25 mm</td></tr><tr><td>额定电容</td><td>220 pF</td></tr><tr><td>型号</td><td>TCC-0805-X</td></tr></table>
+          <h2>5 涂布工序</h2><p>涂布厚度控制在 12±2 μm，涂布速度 8 m/min，烧结温度 180 ℃。</p>
+          <h2>6 工艺质量控制要求</h2><p>每批抽检外观与厚度，记录于工艺记录表，不合格品隔离处理。</p>
+        </div>
+        <p class="text-xs text-slate-400 mt-6 text-center">这是所选蓝本的原文 · 点左侧「确认生成初稿」查看替换参数后的新文档</p>`;
+        return;
+      }
+      $('#doc-title').textContent = '新产品 XYZ · 1206 涂布工序工艺规程（初稿）';
+      $('#doc-badge').textContent = '初稿 · 待审核'; $('#doc-badge').className = 'chip chip-amber !py-0 text-[10px]';
+      $('#doc-actions').classList.remove('hidden'); $('#doc-actions').classList.add('flex');
+
+      const spec = on(0)?'<mark class="chg">1206</mark>':'0805';
+      const size = on(1)?'<mark class="chg-calc">3.2×1.6 mm</mark>':'2.0×1.25 mm';
+      const cap  = on(2)?'<mark class="chg-calc">470 pF</mark>':'220 pF';
+      const thick= on(3)?'<mark class="chg">15±2 μm</mark>':'12±2 μm';
+      const model= on(4)?'<mark class="chg">TCC-1206-X</mark>':'TCC-0805-X';
+
+      body.innerHTML = `<div class="md">
+        <div class="mod-block ${on(0)?'spot':''}">
+          <h2>2 适用范围</h2>
+          <p>本规程适用于 ${spec} 规格多层片式陶瓷电容器涂布工序。</p>
+          ${on(0)?pasteTag('第 2 章 · 适用范围','本规程适用于 1206 规格多层片式陶瓷电容器涂布工序。'):''}
+        </div>
+
+        <div class="mod-block ${(on(1)||on(2)||on(4))?'spot':''}">
+          <h2>附表 1 产品规格</h2>
+          <table>
+            <tr><th>项目</th><th>参数</th></tr>
+            <tr><td>外形尺寸</td><td>${size}</td></tr>
+            <tr><td>额定电容</td><td>${cap}</td></tr>
+            <tr><td>型号</td><td>${model}</td></tr>
+          </table>
+          ${(on(1)||on(2))?`<p class="calc-note">↑ 标虚线者为 AI 按 1206 封装标准推算，请务必核对实际工程值</p>`:''}
+          ${(on(1)||on(2)||on(4))?pasteTag('附表 1 · 产品规格','外形尺寸 3.2×1.6 mm；额定电容 470 pF；型号 TCC-1206-X'):''}
+        </div>
+
+        <div class="mod-block ${on(3)?'spot':''}">
+          <h2>5 涂布工序</h2>
+          <p>涂布厚度控制在 ${thick}，涂布速度 8 m/min，烧结温度 180 ℃。</p>
+          ${on(3)?pasteTag('第 5 章 · 涂布工序','涂布厚度控制在 15±2 μm，涂布速度 8 m/min，烧结温度 180 ℃。'):''}
+        </div>
+
+        <div class="mod-block">
+          <h2>6 工艺质量控制要求</h2>
+          <p>每批抽检外观与厚度，记录于工艺记录表，不合格品隔离处理。</p>
+          <div class="text-[11px] text-slate-400 mt-1">本章无参数变动 · 原样沿用</div>
+        </div>
+      </div>`;
+    }
+
+    function pasteTag(loc, text){
+      return `<div class="paste-tag">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8b79d4" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        <span>粘贴到原 Word：<span class="loc">${loc}</span></span>
+        <button class="paste-copy" onclick='copyText(${JSON.stringify(text)})'>复制纯文本</button>
+      </div>`;
+    }
+    function copyText(t){ (navigator.clipboard?.writeText(t)||Promise.resolve()).finally(()=>toast('已复制纯文本，去 Word 对应位置粘贴')); }
+
+    function generate(){ renderDoc(true); toast('已生成初稿 · 改动已高亮，请核对 AI 推理项'); }
+    function copyDocText(){
+      const t = $('#doc-body')?.innerText || '';
+      (navigator.clipboard?.writeText(t)||Promise.resolve()).finally(()=>toast('已复制全文，去 Word 粘贴'));
+    }
+  </script>
+</body>
+</html>

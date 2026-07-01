@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>火炬电子知识库 · B-2 结构弹窗内就地编辑</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #334155; line-height: 1.6;
+    background:
+      radial-gradient(1100px 700px at 88% -10%, #f1eef8, transparent 60%),
+      #f6f5f9;
+    min-height: 100vh;
+  }
+
+  .kb-behind { position: fixed; inset: 0; padding: 22px 26px; filter: blur(1px); opacity: .5; pointer-events: none; }
+  .kb-behind .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .kb-behind .logo { width: 30px; height: 30px; border-radius: 8px; background: #8b79d4; color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+  .kb-behind .name { font-size: 15px; font-weight: 600; color: #1e293b; }
+  .kb-behind .doc-card { max-width: 520px; background: #fff; border: 1px solid #e7e3f2; border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; }
+  .kb-behind .doc-card .t { font-size: 13.5px; font-weight: 600; color: #1e293b; }
+  .kb-behind .doc-card .m { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+  .kb-behind .doc-card .view { display: inline-block; margin-top: 8px; font-size: 11.5px; color: #8b79d4; border: 1px solid #ddd4f5; border-radius: 999px; padding: 3px 10px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(15,23,42,.32); backdrop-filter: blur(2px); z-index: 40; }
+  .modal { position: fixed; inset: 34px; z-index: 50; background: #fff; border-radius: 22px; box-shadow: 0 30px 80px -30px rgba(20,15,50,.5); display: flex; flex-direction: column; overflow: hidden; }
+  @media (min-width: 900px){ .modal { inset: 48px 8vw; } }
+  .mhead { padding: 15px 22px; border-bottom: 1px solid #eee8f7; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  .mhead .ttl { font-size: 15.5px; font-weight: 600; color: #1e293b; }
+  .doc-ver-badge { font-size: 11px; font-weight: 600; color: #b07410; background: #fbf1dc; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+  .mhead .sub { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+  .mhead .ops { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .obtn { font-size: 11.5px; color: #64748b; background: #fff; border: 1px solid #e7e3f2; border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+  .obtn:hover { background: #f8fafc; }
+  .obtn.on { color: #5b4ba3; background: #f4f0ff; border-color: #ddd4f5; }
+  .xbtn { width: 30px; height: 30px; border-radius: 8px; border: none; background: none; color: #94a3b8; cursor: pointer; font-size: 18px; }
+  .xbtn:hover { background: #f1f5f9; color: #475569; }
+  .mbody { flex: 1; overflow-y: auto; padding: 14px 22px 26px; background: #fcfcfe; }
+  .hidden { display: none !important; }
+
+  /* 结构树 */
+  .tree-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; transition: background .12s; }
+  .tree-row.has-kids, .tree-row.leaf-clickable { cursor: pointer; }
+  .tree-row:hover { background: rgba(139,121,212,.08); }
+  .tree-row.sel { background: rgba(139,121,212,.14); }
+  .tree-num { flex-shrink: 0; width: 20px; text-align: right; font-size: 11px; color: #b8b2cc; font-weight: 600; }
+  .tree-caret { width: 12px; flex-shrink: 0; color: #8b79d4; font-size: 10px; text-align: center; transition: transform .12s; }
+  .tree-node.collapsed > .tree-row .tree-caret { transform: rotate(0deg); }
+  .tree-node:not(.collapsed) > .tree-row .tree-caret { transform: rotate(90deg); }
+  .tree-caret.empty { color: transparent; }
+  .tree-leaf-ico { flex-shrink: 0; display: inline-flex; opacity: .55; }
+  .tree-title { line-height: 20px; }
+  .tree-row.chapter .tree-title { font-size: 13.5px; font-weight: 600; color: #1e293b; }
+  .tree-row.leaf .tree-title { font-size: 12.5px; color: #475569; }
+  .tree-meta { margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+  .tree-page { font-size: 10px; color: #94a3b8; background: rgba(28,24,56,.05); padding: 1px 7px; border-radius: 999px; }
+  .tree-touched { font-size: 10px; color: #b07410; background: #fbf1dc; padding: 1px 7px; border-radius: 999px; }
+  .tree-children { margin-left: 16px; border-left: 1px dashed rgba(28,24,56,.12); padding-left: 7px; }
+  .tree-node.collapsed > .tree-children { display: none; }
+
+  .tree-leaf-detail { margin: 3px 0 8px 30px; border: 1px solid rgba(28,24,56,.08); border-radius: 10px; background: #fff; overflow: hidden; }
+  .tree-leaf-detail.hidden { display: none; }
+  .leaf-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #f4f1fb; background: #faf9fe; }
+  .leaf-toolbar .sp { flex: 1; }
+  .leaf-toolbar .st { font-size: 11px; color: #b07410; }
+  .tbtn { font-size: 11.5px; font-weight: 600; border-radius: 7px; padding: 5px 11px; cursor: pointer; border: 1px solid transparent; }
+  .tbtn.ghost { color: #5b4ba3; background: #fff; border: 1px solid #ddd4f5; }
+  .tbtn.ghost:hover { background: #f7f4ff; }
+  .tbtn.primary { color: #fff; background: #8b79d4; }
+  .tbtn.primary:hover { background: #7b68c9; }
+  .tbtn.plain { color: #64748b; background: #fff; border: 1px solid #e7e3f2; }
+  .tbtn.plain:hover { background: #f8fafc; }
+  .tbtn.danger { color: #b91c1c; background: #fff; border: 1px solid #f0c9c9; }
+  .tbtn.danger:hover { background: #fef2f2; }
+
+  .leaf-pane { padding: 12px 14px; }
+  .tree-leaf-md { font-size: 12.5px; color: #334155; line-height: 1.7; }
+  .tree-leaf-md p { margin: 4px 0; }
+  .tree-leaf-md table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px; }
+  .tree-leaf-md th, .tree-leaf-md td { border: 1px solid #e7e3f2; padding: 5px 8px; text-align: left; }
+  .tree-leaf-md th { background: #faf9fe; font-weight: 600; }
+
+  textarea.editor { width: 100%; min-height: 110px; border: 1px solid #c9bdf0; border-radius: 9px; padding: 10px 12px; font-family: inherit; font-size: 12.5px; line-height: 1.7; color: #334155; resize: vertical; outline: none; background: #fffdfb; }
+  textarea.editor:focus { border-color: #8b79d4; box-shadow: 0 0 0 3px rgba(139,121,212,.15); }
+
+  .ai-bar { border: 1px solid #ddd4f5; border-radius: 9px; overflow: hidden; margin-top: 4px; }
+  .ai-bar .h { padding: 7px 11px; background: #f7f4ff; font-size: 11.5px; color: #6b46c1; font-weight: 600; border-bottom: 1px solid #eee8f7; }
+  .ai-bar .in { display: flex; gap: 7px; padding: 9px 11px; }
+  .ai-bar textarea { flex: 1; border: 1px solid #e2dcf0; border-radius: 7px; padding: 7px 10px; font-family: inherit; font-size: 12px; resize: none; outline: none; }
+  .ai-bar textarea:focus { border-color: #b9aae8; box-shadow: 0 0 0 3px rgba(139,121,212,.12); }
+
+  .ai-worked { font-size: 11.5px; color: #475569; background: #f7f6fc; border: 1px solid #eee8f7; border-radius: 8px; padding: 7px 10px; margin-bottom: 9px; display: flex; align-items: center; gap: 7px; }
+  .ai-worked .dot { width: 14px; height: 14px; border-radius: 50%; background: #e2f7ef; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .diff { font-size: 12.5px; line-height: 1.9; }
+  del { color: #b91c1c; background: #fde7e7; text-decoration: line-through; text-decoration-color: rgba(185,28,28,.55); padding: 0 3px; border-radius: 3px; }
+  ins { color: #15803d; background: #dcfce7; text-decoration: none; padding: 0 3px; border-radius: 3px; font-weight: 600; }
+  .diff-note { font-size: 11px; color: #b07410; margin-top: 7px; }
+  .row-btns { display: flex; gap: 7px; align-items: center; margin-top: 11px; }
+  .row-btns .info { font-size: 11px; color: #94a3b8; }
+
+  .chapter-hint { margin: 3px 0 8px 30px; font-size: 11.5px; color: #94a3b8; padding: 7px 12px; background: #fbfaff; border: 1px dashed rgba(28,24,56,.1); border-radius: 8px; }
+
+  /* 文档级修改历史 */
+  .hist-head { font-size: 12px; color: #64748b; margin: 2px 4px 14px; line-height: 1.6; }
+  .hist-head b { color: #475569; }
+  .ver { display: flex; gap: 9px; padding: 11px 6px; border-top: 1px solid #f1edf9; }
+  .ver:first-of-type { border-top: none; }
+  .ver .vt { flex-shrink: 0; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; height: fit-content; }
+  .ver .vt.cur { background: #efeafb; color: #6b46c1; }
+  .ver .vt.old { background: #eef1f5; color: #94a3b8; }
+  .ver .vb { flex: 1; min-width: 0; }
+  .ver .vm { font-size: 12.5px; color: #334155; }
+  .vloc { display: inline-block; font-size: 10.5px; color: #5b4ba3; background: #efeafb; border: 1px solid #ddd4f5; border-radius: 6px; padding: 1px 7px; margin-right: 6px; }
+  .vloc-sys { color: #94a3b8; background: #eef1f5; border-color: #e2e8f0; }
+  .ver .vmeta { font-size: 10.5px; color: #94a3b8; margin-top: 2px; }
+  .ver .va { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; align-items: flex-start; }
+  .vlink { font-size: 10.5px; color: #8b79d4; cursor: pointer; background: none; border: none; padding: 2px 3px; }
+  .vlink:hover { text-decoration: underline; }
+  .ver-diff { margin-top: 7px; background: #fbfaff; border: 1px solid #eee8f7; border-radius: 7px; padding: 8px 10px; }
+  .ver-diff.hidden { display: none; }
+
+  .foot-note { font-size: 11px; color: #94a3b8; padding: 12px 22px; border-top: 1px dashed #eee8f7; }
+  .foot-note b { color: #64748b; }
+
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(16px); opacity: 0; background: #2a2440; color: #fff; font-size: 12.5px; padding: 9px 18px; border-radius: 999px; transition: all .22s ease; z-index: 80; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+  <div class="kb-behind">
+    <div class="bar"><span class="logo">炬</span><span class="name">研发知识库</span></div>
+    <div class="doc-card">
+      <div class="t">G03 涂布工序工艺规程</div>
+      <div class="m">工艺文件 · 已入库 · 7 章 22 节点 · 2025-11 更新</div>
+      <span class="view">查看结构</span>
+    </div>
+    <div class="doc-card">
+      <div class="t">MLCC 出厂检验规范</div>
+      <div class="m">检验文件 · 已入库 · 5 章 16 节点</div>
+      <span class="view">查看结构</span>
+    </div>
+  </div>
+
+  <div class="overlay"></div>
+
+  <div class="modal">
+    <div class="mhead">
+      <div>
+        <div class="ttl">G03 涂布工序工艺规程<span class="doc-ver-badge" id="doc-ver">v1</span></div>
+        <div class="sub">default · 5 章 · 22 节点 · 点叶子就地编辑；整份文档的修改历史见右上「修改历史」</div>
+      </div>
+      <div class="ops">
+        <button class="obtn" id="btn-hist" onclick="toggleHistory()">修改历史</button>
+        <button class="obtn" id="btn-expand" onclick="expandAll(true)">展开全部</button>
+        <button class="obtn" onclick="expandAll(false)">收起全部</button>
+        <button class="xbtn" title="关闭">&times;</button>
+      </div>
+    </div>
+    <div class="mbody">
+      <div id="tree"></div>
+      <div id="history-view" class="hidden"></div>
+    </div>
+    <div class="foot-note">本页就是现有「查看结构」弹窗 —— 叶子正文区新增 <b>编辑 / AI编辑</b>。改动只作用于当前块，其余原样；每次改动都记入 <b>整份文档的一条修改历史</b>（谁 / 何时 / 改了哪块 / 改了什么），可回退、全程审计留痕。</div>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2000); }
+
+const DOC_ICO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
+const CHECK_ICO = '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0d8a66" stroke-width="3.5"><path d="M20 6L9 17l-5-5"/></svg>';
+
+// 文档结构（静态示例）。叶子带正文；章节只展开、不给 AI编辑
+const TREE = [
+  { num:'1', title:'目的', page:1, leaf:true, text:'规范本产品涂布工序的操作与控制要求，确保产品一致性与可靠性。' },
+  { num:'2', title:'适用范围', page:1, leaf:true, text:'本规程适用于 0805 规格多层片式陶瓷电容器的涂布工序。' },
+  { num:'5', title:'涂布工序', page:3, children:[
+      { title:'5.1 工序参数', page:3, key:'coat', leaf:true, text:'涂布厚度控制在 12±2 μm，涂布速度 8.0 m/min，烧结温度 180 ℃。' },
+      { title:'5.2 操作步骤', page:4, leaf:true, text:'开机预热 20 min；校准刮刀间隙；装料后先试涂 3 片确认厚度合格再连续生产。' },
+      { title:'附表 1 · 产品规格', page:4, leaf:true, table:true, text:'外形尺寸 2.0×1.25 mm；额定电容 220 pF；型号 TCC-0805-X。' },
+  ]},
+  { num:'6', title:'工艺质量控制要求', page:5, leaf:true, text:'每批抽检外观与厚度，记录于工艺记录表，不合格品隔离处理。' },
+];
+
+function keyOf(n){ return n.key || n.title; }
+function locName(n){ return (n.num ? n.num+' ' : '') + n.title; }
+
+// 每个叶子的“当前正文”（仅内容，不含版本 —— 版本是文档级的）
+const LEAF = {};
+(function seed(nodes){ nodes.forEach(n=>{ if(n.children) seed(n.children); else LEAF[keyOf(n)] = n.text; }); })(TREE);
+
+// 每个叶子的编辑态（view/edit/ai/diff），只是交互态，不是版本
+const LEAFUI = {};
+
+// ============ 文档级修改历史：一份文档一条时间线，跨所有块 ============
+const DOC = { version: 4, history: [
+  { v:4, locs:['5.1 工序参数'], op:'手动编辑', who:'工艺组 · 李工', when:'2026-03-12', diff:'涂布速度 <del>8 m/min</del><ins>8.0 m/min</ins>' },
+  { v:3, locs:['2 适用范围'],   op:'手动编辑', who:'工艺组 · 王工', when:'2026-01-08', diff:'适用于 <del>0603 / 0805</del><ins>0805</ins> 规格' },
+  { v:2, locs:['6 工艺质量控制要求'], op:'AI编辑', who:'工艺组 · 张工 · 经 AI 辅助', when:'2025-12-20', diff:'每批抽检外观与厚度<ins>，抽样按 AQL 0.65 判定</ins>' },
+  { v:1, locs:[], op:'文档入库', who:'系统导入', when:'2025-11-20', diff:null },
+]};
+const TOUCHED = new Set(DOC.history.filter(h=>h.diff).flatMap(h=>h.locs)); // 改过的块，树上标注
+
+// ---------- 结构树 ----------
+function renderTree(){ const box=$('#tree'); box.innerHTML=''; TREE.forEach(n=>box.appendChild(makeNode(n,0))); }
+function makeNode(node, depth){
+  const wrap = document.createElement('div');
+  wrap.className = 'tree-node' + (node.children ? ' collapsed' : '');
+  const isChapter = !!node.children;
+  const row = document.createElement('div');
+  row.className = 'tree-row ' + (isChapter ? 'chapter has-kids' : 'leaf leaf-clickable');
+  const k = keyOf(node); row.dataset.key = k;
+  const num = `<span class="tree-num">${node.num||''}</span>`;
+  const caret = `<span class="tree-caret${isChapter?'':' empty'}">${isChapter?'▸':''}</span>`;
+  const ico = isChapter ? '' : `<span class="tree-leaf-ico">${DOC_ICO}</span>`;
+  const touched = (!isChapter && TOUCHED.has(locName(node))) ? '<span class="tree-touched">改过</span>' : '';
+  const page = node.page ? `<span class="tree-page">P${node.page}</span>` : '';
+  row.innerHTML = num + caret + ico + `<span class="tree-title">${node.title}</span><span class="tree-meta">${touched}${page}</span>`;
+  wrap.appendChild(row);
+
+  if(isChapter){
+    const hint = document.createElement('div'); hint.className='chapter-hint';
+    hint.textContent = '章节容器：AI 编辑只作用于下面的叶子块（范围越小越好核对、越不容易误改联动内容）。';
+    wrap.appendChild(hint);
+    const cbox = document.createElement('div'); cbox.className='tree-children';
+    node.children.forEach(c => cbox.appendChild(makeNode(c, depth+1)));
+    wrap.appendChild(cbox);
+    row.addEventListener('click', ()=> wrap.classList.toggle('collapsed'));
+  } else {
+    const detail = document.createElement('div'); detail.className='tree-leaf-detail hidden'; detail.dataset.key=k;
+    wrap.appendChild(detail);
+    row.addEventListener('click', ()=>{
+      document.querySelectorAll('.tree-row.sel').forEach(r=>r.classList.remove('sel'));
+      const willShow = detail.classList.contains('hidden');
+      detail.classList.toggle('hidden');
+      if(willShow){ row.classList.add('sel'); LEAFUI[k]={mode:'view'}; renderDetail(node); }
+    });
+  }
+  return wrap;
+}
+
+function bodyHtml(node){
+  if(node.table) return `<table><tr><th>项目</th><th>参数</th></tr><tr><td>外形尺寸</td><td>2.0×1.25 mm</td></tr><tr><td>额定电容</td><td>220 pF</td></tr><tr><td>型号</td><td>TCC-0805-X</td></tr></table>`;
+  return `<p>${LEAF[keyOf(node)]}</p>`;
+}
+
+function renderDetail(node){
+  const k = keyOf(node);
+  const detail = document.querySelector(`.tree-leaf-detail[data-key="${CSS.escape(k)}"]`);
+  if(!detail) return;
+  const u = LEAFUI[k] || {mode:'view'};
+  let tools='', pane='';
+
+  if(u.mode==='view'){
+    tools = `<span class="st" style="color:#94a3b8">当前正文</span><span class="sp"></span>
+      <button class="tbtn ghost" onclick="setMode('${k}','edit')">编辑</button>
+      <button class="tbtn primary" onclick="setMode('${k}','ai')">AI编辑</button>`;
+    pane = `<div class="tree-leaf-md">${bodyHtml(node)}</div>`;
+  }
+  else if(u.mode==='edit'){
+    tools = `<span class="st">手动编辑中</span>`;
+    pane = `<textarea class="editor" id="ed-${k}">${LEAF[k]}</textarea>
+      <div class="row-btns">
+        <button class="tbtn primary" onclick="saveManual('${k}')">保存</button>
+        <button class="tbtn plain" onclick="setMode('${k}','view')">取消</button>
+        <span class="info">保存即记入文档修改历史（v${DOC.version} → v${DOC.version+1}）</span>
+      </div>`;
+  }
+  else if(u.mode==='ai'){
+    const preset = node.key==='coat' ? '把烧结温度改成 200 ℃，其它不动' : '把这段改得更规范、更精炼';
+    tools = `<span class="st">AI编辑 · 仅改本块</span>`;
+    pane = `<div class="tree-leaf-md" style="opacity:.65">${bodyHtml(node)}</div>
+      <div class="ai-bar">
+        <div class="h">告诉 AI 怎么改这一块（不影响其它章节）</div>
+        <div class="in"><textarea id="ai-${k}" rows="1">${preset}</textarea>
+          <button class="tbtn primary" onclick="runAI('${k}')">发送</button></div>
+      </div>
+      <div class="row-btns"><button class="tbtn plain" onclick="setMode('${k}','view')">取消</button></div>`;
+  }
+  else if(u.mode==='diff'){
+    const d = u.pending;
+    tools = `<span class="st">AI 改动 · 待确认</span>`;
+    pane = `<div class="ai-worked"><span class="dot">${CHECK_ICO}</span>AI 已读本块原文，按「${u.instr}」只改了这一块：</div>
+      <div class="tree-leaf-md diff">${d.html}</div>
+      ${d.note?`<div class="diff-note">${d.note}</div>`:''}
+      <div class="row-btns">
+        <button class="tbtn primary" onclick="acceptAI('${k}')">接受改动</button>
+        <button class="tbtn ghost" onclick="setMode('${k}','ai')">重新说</button>
+        <button class="tbtn danger" onclick="setMode('${k}','view')">放弃</button>
+      </div>`;
+  }
+
+  detail.innerHTML = `<div class="leaf-toolbar">${tools}</div><div class="leaf-pane">${pane}</div>`;
+  if(u.mode==='edit') setTimeout(()=>document.getElementById('ed-'+k)?.focus(),0);
+  if(u.mode==='ai') setTimeout(()=>{ const t=document.getElementById('ai-'+k); if(t){t.focus(); t.setSelectionRange(t.value.length,t.value.length);} },0);
+}
+
+function nodeByKey(k){ for(const n of TREE){ if(keyOf(n)===k) return n; if(n.children) for(const c of n.children) if(keyOf(c)===k) return c; } }
+function setMode(k, mode){ LEAFUI[k] = LEAFUI[k] || {}; LEAFUI[k].mode = mode; renderDetail(nodeByKey(k)); }
+
+function saveManual(k){
+  const node = nodeByKey(k);
+  const before = LEAF[k];
+  const after = document.getElementById('ed-'+k).value.trim();
+  LEAF[k] = after;
+  pushHistory(node, '手动编辑', '工艺组 · 张工', '<del>'+before+'</del><br><ins>'+after+'</ins>');
+  LEAFUI[k].mode='view'; renderTree(); reopen(k);
+  toast('已保存 · 记入文档修改历史 v'+DOC.version);
+}
+function runAI(k){
+  const instr = document.getElementById('ai-'+k).value.trim();
+  if(!instr){ toast('先说一句怎么改'); return; }
+  const node = nodeByKey(k);
+  LEAFUI[k].instr = instr; LEAFUI[k].pending = computeDiff(node, LEAF[k], instr); LEAFUI[k].mode='diff';
+  renderDetail(node);
+}
+function computeDiff(node, text, instr){
+  if(node.key==='coat' && /200|烧结|温度/.test(instr)){
+    return { newText:'涂布厚度控制在 12±2 μm，涂布速度 8.0 m/min，烧结温度 200 ℃。',
+      html:'涂布厚度控制在 12±2 μm，涂布速度 8.0 m/min，烧结温度 <del>180 ℃</del><ins>200 ℃</ins>。',
+      note:'仅改了烧结温度一项，厚度/速度按你的要求原样保留。' };
+  }
+  return { newText:text+'（已按要求规范化）',
+    html:text.replace('。','<del>。</del>')+'<ins>，并按工艺文件用语规范表述。</ins>',
+    note:'示例改动 · 实际会依据你的指令与本块原文生成。' };
+}
+function acceptAI(k){
+  const node = nodeByKey(k);
+  const d = LEAFUI[k].pending;
+  if(d) LEAF[k] = d.newText;
+  pushHistory(node, 'AI编辑', '工艺组 · 张工 · 经 AI 辅助', d ? d.html : null);
+  LEAFUI[k].pending=null; LEAFUI[k].mode='view'; renderTree(); reopen(k);
+  toast('已接受 · 记入文档修改历史 v'+DOC.version);
+}
+function reopen(k){
+  const row = document.querySelector(`.tree-row[data-key="${CSS.escape(k)}"]`);
+  const detail = document.querySelector(`.tree-leaf-detail[data-key="${CSS.escape(k)}"]`);
+  if(row) row.classList.add('sel');
+  if(detail) detail.classList.remove('hidden');
+  renderDetail(nodeByKey(k));
+}
+
+// ============ 文档级修改历史：写入 + 渲染 ============
+function pushHistory(node, op, who, diff){
+  DOC.version++;
+  const loc = locName(node);
+  DOC.history.unshift({ v:DOC.version, locs:[loc], op, who, when:'2026-07-01 今天', diff });
+  if(diff) TOUCHED.add(loc);
+  updateVerBadge();
+  if(!$('#history-view').classList.contains('hidden')) renderHistory();
+}
+function updateVerBadge(){ $('#doc-ver').textContent = 'v'+DOC.version; }
+
+function renderHistory(){
+  const rows = DOC.history.map((h,i)=>{
+    const locHtml = (h.locs && h.locs.length)
+      ? h.locs.map(l=>`<span class="vloc">${l}</span>`).join('')
+      : `<span class="vloc vloc-sys">文档入库</span>`;
+    return `
+    <div class="ver">
+      <span class="vt ${i===0?'cur':'old'}">v${h.v}${i===0?' · 当前':''}</span>
+      <div class="vb">
+        <div class="vm">${locHtml}</div>
+        <div class="vmeta">${h.when} · ${h.who}</div>
+        ${h.diff?`<div class="ver-diff hidden" id="dh-${h.v}"><div class="tree-leaf-md diff">${h.diff}</div></div>`:''}
+      </div>
+      <div class="va">
+        ${h.diff?`<button class="vlink" onclick="toggleDiff(${h.v})">查看 diff</button>`:''}
+        ${(i!==0 && h.diff)?`<button class="vlink" onclick="revert(${h.v})">回退此改动</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  $('#history-view').innerHTML = `<div class="hist-head">整份文档一条时间线 · 共 <b>${DOC.history.length}</b> 条 —— 列表只显示 <b>改动章节 / 日期 / 改动人</b>；「改了什么」点「查看 diff」展开。</div>${rows}`;
+}
+function toggleDiff(v){ const el=document.getElementById('dh-'+v); if(el) el.classList.toggle('hidden'); }
+function revert(v){
+  const h = DOC.history.find(x=>x.v===v); if(!h) return;
+  DOC.version++;
+  DOC.history.unshift({ v:DOC.version, locs:h.locs.slice(), op:'回退', who:'工艺组 · 张工', when:'2026-07-01 今天', diff:h.diff });
+  updateVerBadge(); renderHistory();
+  toast('已回退 v'+v+' 的改动 · 回退本身也记为 v'+DOC.version+'（审计链只增不改）');
+}
+
+function toggleHistory(){
+  const t=$('#tree'), h=$('#history-view'), b=$('#btn-hist');
+  const showHist = h.classList.contains('hidden');
+  h.classList.toggle('hidden', !showHist);
+  t.classList.toggle('hidden', showHist);
+  b.textContent = showHist ? '返回结构' : '修改历史';
+  b.classList.toggle('on', showHist);
+  if(showHist) renderHistory();
+}
+function expandAll(open){ document.querySelectorAll('.tree-node').forEach(n=>{ if(n.querySelector('.tree-children')) n.classList.toggle('collapsed', !open); }); }
+
+updateVerBadge();
+renderTree();
+document.querySelectorAll('.tree-node').forEach(n=>{ if(n.querySelector('.tree-children')) n.classList.remove('collapsed'); });
+</script>
+</body>
+</html>
