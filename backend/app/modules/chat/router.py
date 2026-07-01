@@ -229,7 +229,7 @@ async def node_context(handle: str, text_only: bool = False) -> JSONResponse:
         page = cited_cite.get("page")
         # OCR 高亮:用被引用节点正文(= 数据来源展示的上下文)匹配 PDF 各页文字框 → 原文画框
         rects: list = []
-        if not text_only and doc_id and page:
+        if not text_only and doc_id and page and get_settings().ocr_enabled:
             from app.modules.ingest import document_service, ocr_locate, page_locator
 
             md_path = document_service.get_md_path(doc_id)

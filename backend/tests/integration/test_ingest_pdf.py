@@ -79,6 +79,28 @@ def test_upload_pdf_no_notsure_builds(monkeypatch, tmp_path):
     assert any(t["id"] == tid for t in client.get("/ingest/tasks").json())
 
 
+def test_upload_pdf_skips_ocr_when_disabled(monkeypatch, tmp_path):
+    _stub_convert(monkeypatch, "# 干净文档\n内容清晰无歧义。")
+    monkeypatch.setattr(tree_service, "ingest_one", lambda md_path: {"docs": 1, "nodes": 1})
+
+    from app.modules.ingest import ocr_locate
+
+    def fail_ocr(*args, **kwargs):
+        raise AssertionError("OCR should be disabled by default")
+
+    monkeypatch.setattr(ocr_locate, "write_ocr_sidecar", fail_ocr)
+    client = TestClient(app)
+    r = client.post(
+        "/ingest/upload-pdf",
+        files={"file": ("clean.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    )
+
+    assert r.status_code == 200
+    task = client.get(f"/ingest/tasks/{r.json()['task_id']}").json()
+    assert task["status"] == "done"
+    assert not (tmp_path / "md" / "default" / "clean.md.ocr.json").exists()
+
+
 def test_review_list_and_approve_writes_back(monkeypatch, tmp_path):
     monkeypatch.setattr(tree_service, "ingest_one", lambda md_path: {"docs": 1, "nodes": 3})
     review_service.save_pending(
@@ -152,6 +174,57 @@ def test_reparse_document_with_pdf_creates_ingest_task(monkeypatch, tmp_path):
     assert task["filename"] == "clean.pdf"
     assert task["kb"] == "default"
     assert (md_dir / "clean.md").read_text(encoding="utf-8") == "# clean\n重新解析后的内容"
+    assert not (md_dir / "clean.md.ocr.json").exists()
+
+
+def test_reparse_skips_ocr_when_disabled(monkeypatch, tmp_path):
+    _stub_convert(monkeypatch, "# clean\n重新解析后的内容")
+
+    from app.modules.ingest import ocr_locate
+
+    def fail_ocr(*args, **kwargs):
+        raise AssertionError("OCR should be disabled by default")
+
+    monkeypatch.setattr(ocr_locate, "write_ocr_sidecar", fail_ocr)
+    monkeypatch.setattr(
+        tree_service,
+        "build_tree",
+        lambda md_path, model: {
+            "doc_name": "clean",
+            "doc_description": "",
+            "line_count": 2,
+            "structure": [],
+        },
+    )
+    md_dir = tmp_path / "md" / "default"
+    pdf_dir = tmp_path / "pdf" / "default"
+    ws_dir = tmp_path / "workspace"
+    md_dir.mkdir(parents=True)
+    pdf_dir.mkdir(parents=True)
+    ws_dir.mkdir(parents=True)
+    (md_dir / "clean.md").write_text("# old\n旧内容", encoding="utf-8")
+    (pdf_dir / "clean.pdf").write_bytes(b"%PDF-1.4 fake")
+    (ws_dir / "doc_clean.json").write_text(
+        json.dumps(
+            {
+                "id": "doc_clean",
+                "kb": "default",
+                "path": str(md_dir / "clean.md"),
+                "doc_name": "clean",
+                "doc_description": "",
+                "line_count": 1,
+                "structure": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    r = client.post("/ingest/document/doc_clean/reparse")
+
+    assert r.status_code == 200
+    task = client.get(f"/ingest/tasks/{r.json()['task_id']}").json()
+    assert task["status"] == "done"
     assert not (md_dir / "clean.md.ocr.json").exists()
 
 
@@ -334,6 +407,33 @@ def test_reparse_notsure_approve_replaces_original_doc_id(monkeypatch, tmp_path)
     assert doc["doc_name"] == "renamed title"
     assert not (tmp_path / "pending" / f"{review_doc}.md").exists()
     assert not (tmp_path / "review" / f"{review_doc}.json").exists()
+
+
+def test_review_approve_skips_ocr_when_disabled(monkeypatch, tmp_path):
+    monkeypatch.setattr(tree_service, "ingest_one", lambda md_path: {"docs": 1, "nodes": 1})
+    review_service.save_pending(
+        "检验记录",
+        "膜厚 <notsure>50±5μm</notsure>",
+        original_name="检验记录.pdf",
+        kb="default",
+    )
+    pdf_dir = tmp_path / "pdf" / "default"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "检验记录.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    from app.modules.ingest import ocr_locate
+
+    def fail_ocr(*args, **kwargs):
+        raise AssertionError("OCR should be disabled by default")
+
+    monkeypatch.setattr(ocr_locate, "write_ocr_sidecar", fail_ocr)
+
+    client = TestClient(app)
+    r = client.post("/ingest/review/检验记录/approve", json={"resolutions": {}})
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "approved"
+    assert not (tmp_path / "md" / "default" / "检验记录.md.ocr.json").exists()
 
 
 def test_commit_reparse_candidate_restores_index_artifacts_when_rebuild_fails(

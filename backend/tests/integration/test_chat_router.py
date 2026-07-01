@@ -92,3 +92,44 @@ def test_build_messages_includes_history():
     assert msgs[0] == {"role": "user", "content": "HJ900001 结论?"}
     assert msgs[1] == {"role": "assistant", "content": "符合要求"}  # sources 被剥离
     assert msgs[-1] == {"role": "user", "content": "那它呢"}
+
+
+def test_node_context_skips_ocr_rects_when_disabled(monkeypatch, tmp_path):
+    class FakeStore:
+        def read_node(self, handle):
+            return {
+                "title": "涂布",
+                "text": "涂布正文",
+                "prev_id": None,
+                "next_id": None,
+                "section": {},
+                "cite": {
+                    "doc_id": "doc_demo",
+                    "doc": "demo",
+                    "section": "涂布",
+                    "lines": "1-2",
+                    "page": 3,
+                },
+                "path": "demo > 涂布",
+            }
+
+        def open_node(self, handle):
+            return {"children": []}
+
+    md_path = tmp_path / "demo.md"
+    md_path.write_text("# 涂布\n正文", encoding="utf-8")
+    monkeypatch.setattr(router_mod, "get_store", lambda: FakeStore())
+
+    from app.modules.ingest import document_service, ocr_locate
+
+    monkeypatch.setattr(document_service, "get_md_path", lambda doc_id: md_path)
+
+    def fail_load_ocr(*args, **kwargs):
+        raise AssertionError("OCR should be disabled by default")
+
+    monkeypatch.setattr(ocr_locate, "load_ocr", fail_load_ocr)
+
+    r = TestClient(app).get("/chat/node", params={"handle": "doc_demo:0001"})
+
+    assert r.status_code == 200
+    assert r.json()["rects"] == []

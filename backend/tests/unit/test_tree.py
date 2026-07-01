@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from app.core.pageindex import utils as pageindex_utils
 from app.modules.ingest import tree as tree_mod
 
 
@@ -29,3 +32,24 @@ def test_build_tree_returns_structure(tmp_path, monkeypatch):
     assert result["doc_description"] == "测试文档"
     assert len(result["structure"]) == 2
     assert result["structure"][0]["nodes"][0]["title"] == "子标题A1"
+
+
+@pytest.mark.asyncio
+async def test_pageindex_llm_disables_thinking_by_default(monkeypatch):
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+
+        class Choice:
+            message = type("Message", (), {"content": "摘要"})()
+
+        return type("Response", (), {"choices": [Choice()]})()
+
+    monkeypatch.delenv("PAGEINDEX_ENABLE_THINKING", raising=False)
+    monkeypatch.setattr(pageindex_utils.litellm, "acompletion", fake_acompletion)
+
+    result = await pageindex_utils.llm_acompletion("openai/qwen3.7-max", "总结")
+
+    assert result == "摘要"
+    assert captured["extra_body"] == {"enable_thinking": False}

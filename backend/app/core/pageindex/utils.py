@@ -29,6 +29,12 @@ def count_tokens(text, model=None):
     return litellm.token_counter(model=model, text=text)
 
 
+def _qwen_thinking_kwargs():
+    if os.getenv("PAGEINDEX_ENABLE_THINKING", "false").lower() == "true":
+        return {}
+    return {"extra_body": {"enable_thinking": False}}
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     if model:
         model = model.removeprefix("litellm/")
@@ -40,6 +46,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 model=model,
                 messages=messages,
                 temperature=0,
+                **_qwen_thinking_kwargs(),
             )
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -70,6 +77,7 @@ async def llm_acompletion(model, prompt):
                 model=model,
                 messages=messages,
                 temperature=0,
+                **_qwen_thinking_kwargs(),
             )
             return response.choices[0].message.content
         except Exception as e:

@@ -91,17 +91,21 @@ def ingest_pdf(
     if tmp_pagemap.exists():
         shutil.move(str(tmp_pagemap), str(md_dir / f"{stem}.md.pagemap.json"))
     tmp_md.unlink(missing_ok=True)
-    # OCR 原 PDF → <md>.ocr.json（扫描件文字框，供「原文 PDF」高亮被引用处）；失败不阻断入库
+    # OCR 原 PDF → <md>.ocr.json（扫描件文字框，供「原文 PDF」高亮被引用处）；默认关闭以省入库耗时。
     t_ocr = 0.0
-    try:
-        from app.modules.ingest.ocr_locate import write_ocr_sidecar
+    if settings.ocr_enabled:
+        try:
+            from app.modules.ingest.ocr_locate import write_ocr_sidecar
 
-        _t = time.perf_counter()
-        n_boxes = write_ocr_sidecar(pdf_dir / f"{stem}.pdf", final_md)
-        t_ocr = time.perf_counter() - _t
-        log.info("ocr_sidecar_written", stem=stem, boxes=n_boxes, secs=round(t_ocr, 1))
-    except Exception:
-        log.exception("ocr_sidecar_failed", stem=stem)
+            _t = time.perf_counter()
+            n_boxes = write_ocr_sidecar(pdf_dir / f"{stem}.pdf", final_md)
+            t_ocr = time.perf_counter() - _t
+            log.info("ocr_sidecar_written", stem=stem, boxes=n_boxes, secs=round(t_ocr, 1))
+        except Exception:
+            log.exception("ocr_sidecar_failed", stem=stem)
+    else:
+        Path(str(final_md) + ".ocr.json").unlink(missing_ok=True)
+        log.info("ocr_sidecar_skipped", stem=stem, reason="disabled")
 
     _t = time.perf_counter()
     tree = ingest_one(final_md)  # 增量入库：只建本篇树，其余文档复用 workspace

@@ -36,6 +36,10 @@ def _cleanup_tmp_md(tmp_md: Path) -> None:
 
 
 def _write_tmp_ocr(pdf_path: str, tmp_md: Path) -> Path | None:
+    if not get_settings().ocr_enabled:
+        Path(str(tmp_md) + ".ocr.json").unlink(missing_ok=True)
+        log.info("reparse_ocr_sidecar_skipped", md=str(tmp_md), reason="disabled")
+        return None
     try:
         from app.modules.ingest.ocr_locate import write_ocr_sidecar
 

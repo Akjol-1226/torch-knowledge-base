@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # PDF→PNG 渲染 DPI（喂 VLM 解析）；500→600 提升标题/mermaid 质量；.env 可覆盖
     pdf_render_dpi: int = 600
     ocr_render_dpi: int = 200  # OCR 侧车渲染 DPI（只画高亮框、不需高清）；与 VLM DPI 解耦，GPU 上快
+    ocr_enabled: bool = False  # OCR 侧车默认关闭：跳过入库 OCR 与原文 PDF 画框，代码保留可随时启用
     ocr_use_gpu: bool = True  # OCR 默认 GPU(CUDA)；OCR_USE_GPU=false 强制 CPU（无 GPU 也自动回退）
     # OCR 提取调参（低清扫描友好）：box_thresh 略降→召回 faint 文字；unclip_ratio 略升→框完整字形；
     # min_score 过滤低置信框(印章/噪声)并把置信度存入侧车

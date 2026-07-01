@@ -107,6 +107,10 @@ def _cleanup_tmp_md(tmp_md: Path) -> None:
 
 
 def _write_tmp_ocr(pdf_file: Path, tmp_md: Path) -> Path | None:
+    if not get_settings().ocr_enabled:
+        Path(str(tmp_md) + ".ocr.json").unlink(missing_ok=True)
+        log.info("ocr_sidecar_skipped_on_approve", doc=tmp_md.stem, reason="disabled")
+        return None
     if not pdf_file.exists():
         return None
     try:
@@ -201,15 +205,18 @@ def approve(doc: str, resolutions: dict[str, str] | None = None, *, build: bool 
             from app.modules.ingest.tree_service import ingest_one
 
             md_file = target / f"{doc}.md"
-            # 补 OCR 侧车（与直接入库路径一致；失败不阻断）：原 PDF 在进待审前已存到
-            # data/pdf/<kb>/<stem>.pdf，让经审文档同样能在「原文 PDF」里高亮被引处。
-            try:
-                from app.modules.ingest.ocr_locate import write_ocr_sidecar
+            # 补 OCR 侧车（与直接入库路径一致；失败不阻断）：默认关闭以省审核入库耗时。
+            if get_settings().ocr_enabled:
+                try:
+                    from app.modules.ingest.ocr_locate import write_ocr_sidecar
 
-                pdf_file = get_settings().data_dir / "pdf" / kb / f"{doc}.pdf"
-                if pdf_file.exists():
-                    write_ocr_sidecar(pdf_file, md_file)
-            except Exception:
-                log.exception("ocr_sidecar_failed_on_approve", doc=doc)
+                    pdf_file = get_settings().data_dir / "pdf" / kb / f"{doc}.pdf"
+                    if pdf_file.exists():
+                        write_ocr_sidecar(pdf_file, md_file)
+                except Exception:
+                    log.exception("ocr_sidecar_failed_on_approve", doc=doc)
+            else:
+                Path(str(md_file) + ".ocr.json").unlink(missing_ok=True)
+                log.info("ocr_sidecar_skipped_on_approve", doc=doc, reason="disabled")
             result["tree"] = ingest_one(md_file)  # 增量入库，不重建全库
         return result
