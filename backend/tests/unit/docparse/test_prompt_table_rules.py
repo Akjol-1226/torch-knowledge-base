@@ -3,7 +3,7 @@ from app.core.docparse.prompts import PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
 def test_prompt_contains_html_table_instruction():
-    """New rules must mention HTML <table> for merged cells."""
+    """Table rules must mention HTML <table>."""
     assert "<table>" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
@@ -13,25 +13,28 @@ def test_prompt_contains_colspan_rowspan():
     assert "rowspan" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
-def test_prompt_contains_two_path_rule():
-    """New rules must distinguish simple vs complex tables."""
-    assert "简单表格" in PAGE_MARKDOWN_SYSTEM_PROMPT
-    assert "复杂表格" in PAGE_MARKDOWN_SYSTEM_PROMPT
+def test_prompt_requires_all_tables_as_html():
+    """All document tables should be emitted as HTML tables."""
+    assert "PDF 原文中的文档表格" in PAGE_MARKDOWN_SYSTEM_PROMPT
+    assert "一律使用 HTML" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
-def test_prompt_markdown_table_requires_leading_pipe():
-    """New rules must require leading | on every row."""
-    assert "每行必须以 `|` 开头" in PAGE_MARKDOWN_SYSTEM_PROMPT
+def test_prompt_forbids_markdown_tables():
+    """Document tables should not use Markdown pipe table syntax."""
+    assert "严禁" in PAGE_MARKDOWN_SYSTEM_PROMPT
+    assert "Markdown `|` 表格语法输出 PDF 原文中的文档表格" in PAGE_MARKDOWN_SYSTEM_PROMPT
+
+
+def test_prompt_allows_flowchart_helper_structures():
+    """Flowchart Mermaid and generated helper lists are not document tables."""
+    assert "Mermaid 图" in PAGE_MARKDOWN_SYSTEM_PROMPT
+    assert "节点列表" in PAGE_MARKDOWN_SYSTEM_PROMPT
+    assert "生成型辅助结构" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
 def test_old_flat_table_rule_removed():
     """The old single-line rule must be gone."""
     assert "用标准 Markdown 表格语法完整还原所有行列" not in PAGE_MARKDOWN_SYSTEM_PROMPT
-
-
-def test_prompt_contains_separator_row_rule():
-    """Prompt must specify that separator row column count matches header."""
-    assert "列数必须与表头完全一致" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
 def test_prompt_contains_no_ghost_cells_rule():
@@ -45,16 +48,6 @@ def test_prompt_contains_no_style_attribute_rule():
     assert "style" in PAGE_MARKDOWN_SYSTEM_PROMPT
     assert "class" in PAGE_MARKDOWN_SYSTEM_PROMPT
     assert "id" in PAGE_MARKDOWN_SYSTEM_PROMPT
-
-
-def test_prompt_contains_data_row_column_count_rule():
-    """Prompt must require data rows to have the same column count as the header."""
-    assert "所有数据行的列数必须与表头列数完全相同" in PAGE_MARKDOWN_SYSTEM_PROMPT
-
-
-def test_prompt_forbids_markdown_for_merged_cells():
-    """Prompt must explicitly forbid Markdown | for merged-cell tables."""
-    assert "严禁" in PAGE_MARKDOWN_SYSTEM_PROMPT
 
 
 def test_prompt_contains_column_mismatch_failure_example():

@@ -43,6 +43,37 @@ def test_detects_missing_diagram_on_second_step_row():
     assert 'missing_process_table_diagram' in issues
 
 
+def test_detects_missing_diagram_on_html_process_table():
+    md = (
+        "<table>\n"
+        "  <thead>\n"
+        "    <tr><th>流程</th><th>图示</th><th>工序（步）内容及要求</th><th>设备</th></tr>\n"
+        "  </thead>\n"
+        "  <tbody>\n"
+        "    <tr><td>原料称取</td><td>*(图片内容描述：天平称量)*</td><td>1.1 步骤</td><td>天平</td></tr>\n"
+        "    <tr><td>悬混制作</td><td></td><td>2.1 步骤</td><td>搅拌机</td></tr>\n"
+        "  </tbody>\n"
+        "</table>"
+    )
+
+    issues = process_table_diagram_issues(md)
+
+    assert 'missing_process_table_diagram' in issues
+
+
+def test_detects_short_diagram_on_html_process_table():
+    md = (
+        "<table>\n"
+        "  <tr><th>流程</th><th>图示</th><th>工序（步）内容及要求</th></tr>\n"
+        "  <tr><td>原料称取</td><td>设备图</td><td>1.1 步骤</td></tr>\n"
+        "</table>"
+    )
+
+    issues = process_table_diagram_issues(md)
+
+    assert 'missing_process_table_diagram' in issues
+
+
 def test_skips_arrow_only_flow_rows():
     md = (
         "| 流程 | 图示 | 工序（步）内容及要求 |\n"

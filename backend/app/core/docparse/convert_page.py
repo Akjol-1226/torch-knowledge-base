@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 from .models import DocumentContext, PageContext, Heading, PageStructure
@@ -23,7 +24,7 @@ from .heading_rules import (
     relevel_table_headings,
     PROCESS_SECTION_LINE_RE,
 )
-from .utils import strip_notsure, normalize_heading_text
+from .utils import strip_notsure
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,45 @@ def _is_table_separator(cells: list[str]) -> bool:
     return all(not c or re.fullmatch(r':?-{3,}:?', c.replace(' ', '')) for c in cells)
 
 
+class _HtmlTableRowParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == 'tr':
+            self._current_row = []
+        elif tag in ('td', 'th') and self._current_row is not None:
+            self._current_cell = []
+        elif tag == 'br' and self._current_cell is not None:
+            self._current_cell.append('\n')
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in ('td', 'th') and self._current_row is not None and self._current_cell is not None:
+            self._current_row.append(''.join(self._current_cell).strip())
+            self._current_cell = None
+        elif tag == 'tr' and self._current_row is not None:
+            if self._current_row:
+                self.rows.append(self._current_row)
+            self._current_row = None
+            self._current_cell = None
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+
+def _html_table_rows(markdown: str) -> list[list[str]]:
+    parser = _HtmlTableRowParser()
+    parser.feed(markdown)
+    parser.close()
+    return parser.rows
+
+
 def _plain_cell(text: str) -> str:
     text = re.sub(r'<br\s*/?>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'<[^>]+>', '', text)
@@ -101,18 +141,31 @@ def process_table_diagram_issues(markdown: str) -> list[str]:
     """Each process-table step row must have its own 图示 description."""
     if not PROCESS_TABLE_HINT_RE.search(markdown):
         return []
+    html_rows = _html_table_rows(markdown)
+    if html_rows:
+        return _process_table_rows_diagram_issues(html_rows)
+
+    pipe_rows: list[list[str] | None] = []
+    for line in markdown.split('\n'):
+        if '|' not in line:
+            pipe_rows.append(None)
+            continue
+        pipe_rows.append(_split_table_cells(line))
+    return _process_table_rows_diagram_issues(pipe_rows)
+
+
+def _process_table_rows_diagram_issues(rows: list[list[str] | None]) -> list[str]:
     issues: list[str] = []
     diagram_col: int | None = None
     flow_col: int | None = None
     step_col: int | None = None
     active = False
 
-    for line in markdown.split('\n'):
-        if '|' not in line:
+    for cells in rows:
+        if cells is None:
             active = False
             diagram_col = flow_col = step_col = None
             continue
-        cells = _split_table_cells(line)
         if '图示' in cells:
             diagram_col = cells.index('图示')
             flow_col = cells.index('流程') if '流程' in cells else None
@@ -305,7 +358,7 @@ def convert_page_to_markdown(image_path: Path, page_context: PageContext) -> str
                 f'缺少项：{", ".join(missing)}。'
                 '请重新输出：① 先输出本页真实章节标题（known_headings，用 ### 等，不得用流程图小节顶替）；'
                 '② 再用 #### 输出五个流程图补充小节（流程图/架构图信息、节点列表、关系列表、'
-                '流程链路总结、Mermaid 图）；③ 逐字转写页面上所有参数表/工艺表等 Markdown 表格，'
+                '流程链路总结、Mermaid 图）；③ 逐字转写页面上所有参数表/工艺表等 HTML 表格，'
                 '不得因节点列表已写而省略表格正文。'
             )
             md = call_vlm(

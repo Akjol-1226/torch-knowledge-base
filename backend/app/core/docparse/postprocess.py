@@ -52,7 +52,6 @@ _HTML_TABLE_OPEN_RE = re.compile(r'<table\b', re.IGNORECASE)
 _HTML_TABLE_CLOSE_RE = re.compile(r'</table>', re.IGNORECASE)
 _HTML_TBODY_OPEN_RE = re.compile(r'<tbody>', re.IGNORECASE)
 _HTML_TBODY_CLOSE_RE = re.compile(r'</tbody>', re.IGNORECASE)
-_MD_SEP_ROW_RE = re.compile(r'^\|(?:[ :]*-{3,}[ :]*\|)+\s*$')
 _SENTENCE_PUNCT_RE = re.compile(r'[；。！？]')
 _TOC_ENTRY_HEADING_RE = re.compile(
     r'^(#{2,3})\s+(.+?)\s*[\.…·]{4,}\s*\d{1,3}\s*$'
@@ -83,31 +82,6 @@ def repair_unclosed_html_tables(text: str) -> str:
             part = part.rstrip('\n') + closing + '\n'
         result.append(part)
     return ''.join(result)
-
-
-def fix_markdown_table_header(text: str) -> str:
-    """Prepend an empty header row when a Markdown table starts with a separator row."""
-    lines = text.split('\n')
-    result: list[str] = []
-    in_code = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('```'):
-            in_code = not in_code
-            result.append(line)
-            continue
-        if in_code:
-            result.append(line)
-            continue
-        if _MD_SEP_ROW_RE.match(stripped):
-            prev = result[-1].strip() if result else ''
-            is_prev_data_row = prev.startswith('|') and not _MD_SEP_ROW_RE.match(prev)
-            if not is_prev_data_row:
-                col_count = stripped.count('|') - 1
-                empty_header = '| ' + ' | '.join([' '] * col_count) + ' |'
-                result.append(empty_header)
-        result.append(line)
-    return '\n'.join(result)
 
 
 def demote_headings_in_html_table_cells(text: str) -> str:
@@ -414,9 +388,24 @@ def normalize_redacted_notsure(text: str) -> str:
         return re.sub(r'<NOTSURE>.*$', '', line, flags=re.DOTALL)
 
     text = '\n'.join(_strip_signature_line_notsure(ln) for ln in text.split('\n'))
-    text = re.sub(r'<NOTSURE>(?:(?!</NOTSURE>).)*$', '', text, flags=re.DOTALL)
+    text = '\n'.join(_strip_unclosed_notsure_line(ln) for ln in text.split('\n'))
     text = _strip_bare_redaction_placeholders(text)
     return text
+
+
+def _strip_unclosed_notsure_line(line: str) -> str:
+    """Handle dangling NOTSURE starts without deleting following document lines."""
+    marker = '<NOTSURE>'
+    close = '</NOTSURE>'
+    while line.count(marker) > line.count(close):
+        pos = line.rfind(marker)
+        prefix = line[:pos]
+        tail = line[pos + len(marker):]
+        if is_redaction_notsure_inner(tail):
+            line = prefix
+        else:
+            line = prefix + tail
+    return line
 
 
 def _strip_bare_redaction_placeholders(text: str) -> str:
@@ -448,12 +437,20 @@ def _get_boundary_lines(page_text: str, n: int = 3) -> list[str]:
     return lines[:n] + (lines[-n:] if len(lines) > n else [])
 
 
+def _is_table_structure_line(clean: str) -> bool:
+    if clean.startswith('|'):
+        return True
+    return bool(re.match(r'</?(?:table|thead|tbody|tr)\b', clean, re.IGNORECASE))
+
+
 def deduplicate_headers_footers(pages: list[str]) -> list[str]:
     count: dict[str, int] = {}
     for page_text in pages:
         seen: set[str] = set()
         for line in _get_boundary_lines(page_text):
             clean = strip_notsure(line).strip()
+            if _is_table_structure_line(clean):
+                continue
             if clean and clean not in seen:
                 count[clean] = count.get(clean, 0) + 1
                 seen.add(clean)
@@ -468,6 +465,9 @@ def deduplicate_headers_footers(pages: list[str]) -> list[str]:
         filtered = []
         for i, ln in enumerate(lines):
             clean = strip_notsure(ln).strip()
+            if _is_table_structure_line(clean):
+                filtered.append(ln)
+                continue
             if i in boundary and clean in repeated and not HEADING_LINE_RE.match(clean):
                 continue
             filtered.append(ln)
@@ -511,6 +511,29 @@ def _is_page_footer_div(line: str) -> bool:
         return True
     lines = [ln.strip() for ln in plain.split('\n') if ln.strip()]
     return all(ln == '定型' or PAGE_NUMBER_LINE_RE.match(ln) for ln in lines)
+
+
+def repair_unclosed_code_fences_at_page_markers(text: str) -> str:
+    lines = text.split('\n')
+    result: list[str] = []
+    in_code = False
+    for line in lines:
+        stripped = line.strip()
+        if PAGE_MARKER_RE.match(stripped) and in_code:
+            result.append('```')
+            in_code = False
+        if stripped.startswith('```'):
+            if not in_code:
+                in_code = True
+            elif stripped == '```':
+                in_code = False
+            else:
+                result.append('```')
+                in_code = True
+        result.append(line)
+    if in_code:
+        result.append('```')
+    return '\n'.join(result)
 
 
 def strip_output_noise(text: str) -> str:
@@ -1170,11 +1193,11 @@ def postprocess_markdown(
     text = insert_appendix_parent_nodes(text)
     text = demote_figure_formula_headings(text)
     text = validate_and_annotate_mermaid(text)
+    text = repair_unclosed_code_fences_at_page_markers(text)
     text = demote_headings_in_html_table_cells(text)
     text = demote_toc_style_headings(text)
     text = strip_output_noise(text)
     text = repair_unclosed_html_tables(text)
-    text = fix_markdown_table_header(text)
     text = inject_missing_headings_from_outline(text, document_context)
     text = inject_running_section_headers(text, document_context)
     text = repromote_demoted_phase1_headings(text, document_context)

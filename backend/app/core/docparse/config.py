@@ -16,10 +16,6 @@ class Config:
     relevel_max_tokens: int
     relevel_timeout: float
     enable_relevel: bool
-    phase25_model: str
-    phase25_max_tokens: int
-    phase25_timeout: float
-    enable_phase25: bool
     enable_thinking: bool
     temperature: float
     top_p: float
@@ -61,10 +57,6 @@ def get_config() -> Config:
                 relevel_max_tokens=int(os.getenv("QWEN_RELEVEL_MAX_TOKENS", "32768")),
                 relevel_timeout=float(os.getenv("QWEN_RELEVEL_TIMEOUT", "600")),
                 enable_relevel=os.getenv("ENABLE_RELEVEL", "true").lower() == "true",
-                phase25_model=os.getenv("QWEN_PHASE25_MODEL", "qwen3.7-max").strip(),
-                phase25_max_tokens=int(os.getenv("QWEN_PHASE25_MAX_TOKENS", "8192")),
-                phase25_timeout=float(os.getenv("QWEN_PHASE25_TIMEOUT", "300")),
-                enable_phase25=os.getenv("ENABLE_PHASE25", "true").lower() == "true",
                 enable_thinking=os.getenv("QWEN_ENABLE_THINKING", "false").lower() == "true",
                 temperature=float(os.getenv("QWEN_TEMPERATURE", "0")),
                 top_p=float(os.getenv("QWEN_TOP_P", "0.1")),
