@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.modules.chat import conversation_service
 from app.modules.chat.agent import build_agent
-from app.modules.chat.sse import build_grounding_correction, events_from_astream
+from app.modules.chat.sse import autofix_grounding, build_grounding_correction, events_from_astream
 from app.modules.chat.tools import current_kbs, get_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -130,6 +130,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                             yield _sse(ev)  # tool / tool_result 始终实时透传
                     ungrounded = (pending or {}).get("ungrounded") or []
                     if attempt == 0 and ungrounded:
+                        fixed = await run_in_threadpool(autofix_grounding, pending, ungrounded)
+                        if fixed is not None:
+                            log.info("chat_grounding_autofixed", turn=turn,
+                                     n=len(ungrounded), ids=ungrounded[:10],
+                                     missing=fixed.get("grounding_missing", []))
+                            final_ev = fixed
+                            break
                         log.info("chat_grounding_correct", turn=turn,
                                  n=len(ungrounded), ids=ungrounded[:10])
                         note = f"核对引用·补读 {len(ungrounded)} 个未读但被引用的节点"

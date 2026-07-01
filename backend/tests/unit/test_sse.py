@@ -1,6 +1,6 @@
 import json
 
-from app.modules.chat.sse import events_from_stream, extract_cite
+from app.modules.chat.sse import autofix_grounding, events_from_stream, extract_cite
 
 
 class FakeAI:
@@ -66,6 +66,24 @@ def test_events_sequence_tool_chunk_answer():
     ]
 
 
+def test_read_node_does_not_emit_incremental_source_event_before_answer():
+    """数据来源恢复为最终 answer 一起返回，不在流式中途单独发 source 事件。"""
+    rn = {"cite": {"doc": "工艺文件", "section": "5.3 回流焊", "lines": "8-14",
+                   "handle": "doc_a:0003", "doc_id": "doc_a", "snippet": "峰值245℃"}}
+    stream = [
+        ("updates", {"tools": {"messages": [_tool_msg(rn)]}}),
+        ("messages", (FakeChunk("峰值 245℃[[cite:doc_a:0003]]"), {"langgraph_node": "agent"})),
+    ]
+    evs = list(events_from_stream(stream))
+    types = [e["type"] for e in evs]
+
+    assert types == ["tool_result", "chunk", "answer"]
+    assert evs[-1]["sources"] == [
+        {"doc_id": "doc_a", "doc_name": "工艺文件",
+         "nodes": [{"handle": "doc_a:0003", "section": "5.3 回流焊", "lines": "8-14", "snippet": "峰值245℃"}]}
+    ]
+
+
 def test_sources_group_by_doc_and_dedup_node():
     """同一文档的多个 read_node 归到一张卡（诉求1）；重复 handle 去重；保留首次出现顺序。
     每次 read_node 返回一个含 cite 的 dict（只有 read_node 才进 sources）。"""
@@ -108,6 +126,7 @@ def test_search_results_do_not_enter_sources():
     ans = [e for e in events_from_stream(stream) if e["type"] == "answer"][0]
     assert ans["sources"] == []          # 搜到但没 read_node → 无数据来源
     assert "245℃" in ans["text"]         # 答案文本照常返回（前端会丢弃悬空上标）
+    assert not [e for e in events_from_stream(stream) if e["type"] == "source"]
 
 
 def test_read_then_cite_enters_sources():
@@ -149,6 +168,41 @@ def test_seed_cites_marks_node_as_grounded():
     ans = [e for e in events_from_stream(stream, seed_cites=seed) if e["type"] == "answer"][0]
     assert ans["ungrounded"] == []
     assert [n["handle"] for g in ans["sources"] for n in g["nodes"]] == ["doc_x:0009"]
+
+
+def test_autofix_grounding_adds_readable_sources_and_drops_missing(monkeypatch):
+    """少量未接地引用走轻量补读：读得到的加入 sources，读不到的引用标记直接删除。"""
+    import app.modules.chat.tools as tools_mod
+
+    class FakeStore:
+        def read_node(self, hid):
+            if hid == "doc_x:0001":
+                return {"title": "流程图", "text": "节点列表：J01 进料检验判定……",
+                        "cite": {"doc": "工艺", "section": "流程图", "lines": "1-9",
+                                 "handle": "doc_x:0001", "doc_id": "doc_x"}}
+            return {"error": "not found"}
+
+    monkeypatch.setattr(tools_mod, "get_store", lambda: FakeStore())
+    ev = {
+        "type": "answer",
+        "text": "已读结论[[cite:doc_x:0001]]，缺失结论[[cite:doc_x:9999]]",
+        "sources": [],
+        "ungrounded": ["doc_x:0001", "doc_x:9999"],
+        "read_cites": [],
+    }
+
+    fixed = autofix_grounding(ev, ev["ungrounded"])
+
+    assert fixed is not None
+    assert fixed["ungrounded"] == []
+    assert "[[cite:doc_x:0001]]" in fixed["text"]
+    assert "[[cite:doc_x:9999]]" not in fixed["text"]
+    assert [n["handle"] for g in fixed["sources"] for n in g["nodes"]] == ["doc_x:0001"]
+
+
+def test_autofix_grounding_declines_many_ungrounded_ids():
+    ev = {"type": "answer", "text": "", "sources": [], "ungrounded": [], "read_cites": []}
+    assert autofix_grounding(ev, ["a:1", "a:2", "a:3", "a:4"]) is None
 
 
 def test_build_grounding_correction(monkeypatch):

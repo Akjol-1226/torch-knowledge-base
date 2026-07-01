@@ -62,14 +62,14 @@ def _is_read_node_result(tool_name: str, raw) -> bool:
     return isinstance(data, dict) and isinstance(data.get("cite"), dict)
 
 
-def _add_cite(state, cite: dict) -> None:
+def _add_cite(state, cite: dict) -> bool:
     """把一个 cite dict 按文档分组、node 按 handle 去重累积进 state['sources']。
     cite 缺 handle/doc_id 时（旧数据/手构）用 doc+section+lines 兜底去重、用 doc 名分组。"""
     handle = cite.get("handle") or "·".join(
         (cite.get("doc", ""), cite.get("section", ""), cite.get("lines", ""))
     )
     if handle in state["seen"]:
-        return
+        return False
     state["seen"].add(handle)
     doc_id = cite.get("doc_id") or cite.get("doc", "")
     grp = state["doc_index"].get(doc_id)
@@ -83,6 +83,7 @@ def _add_cite(state, cite: dict) -> None:
         "lines": cite.get("lines", ""),
         "snippet": cite.get("snippet", ""),
     })
+    return True
 
 
 def _map_event(mode, data, state):
@@ -121,8 +122,9 @@ def _map_event(mode, data, state):
                     # 全文，而非 search_nodes 的片段。搜到但没 read 的节点不进 sources，其 [[cite]]
                     # 上标在前端因 handle 不在 sources 被丢弃（见 _answer_event 的未读引用校验）。
                     if _is_read_node_result(tool_name, raw):
+                        added = False
                         for c in extract_cite(raw):
-                            _add_cite(state, c)
+                            added = _add_cite(state, c) or added
                             h = c.get("handle")
                             if h and h not in state["read_ids"]:  # 去重，避免同轮重复读
                                 state["read_ids"].add(h)
@@ -150,20 +152,11 @@ def _answer_event(state):
             "ungrounded": ungrounded, "read_cites": state["read_cites"]}
 
 
-def build_grounding_correction(ungrounded_ids: list) -> tuple:
-    """为接地纠正轮服务端补读"被引用但本轮未 read_node 读过"的节点。
-
-    返回 (seed_cites, corrective_text)：
-    - seed_cites 注入纠正轮 state（_new_state(seed_cites=...)）→ 这些节点算"已读"，
-      纠正答案可合法引用并进数据来源；
-    - corrective_text 作为一条 user 消息回灌，附上能读到的正文，要求模型据此重写、删无据内容。
-    读不到的 id（多半模型凭空标的）只在指令里要求删除相关内容。
-    """
+def _read_grounding_cites(ungrounded_ids: list) -> tuple[list, list]:
     from app.modules.chat.tools import get_store
 
     store = get_store()
     seed_cites: list = []
-    blocks: list = []
     missing: list = []
     for hid in ungrounded_ids:
         try:
@@ -179,8 +172,59 @@ def build_grounding_correction(ungrounded_ids: list) -> tuple:
         cite["doc_id"] = cite.get("doc_id") or hid.split(":")[0]
         text = node.get("text", "")
         cite["snippet"] = text[:200]
+        cite["_grounding_title"] = node.get("title", "")
+        cite["_grounding_text"] = text
         seed_cites.append(cite)
-        blocks.append(f"【{hid}｜{node.get('title', '')}】\n{text[:1800]}")
+    return seed_cites, missing
+
+
+def _strip_cite_markers(text: str, handles: list) -> str:
+    for hid in handles:
+        text = text.replace(f"[[cite:{hid}]]", "")
+    return text
+
+
+def autofix_grounding(final_ev: dict, ungrounded_ids: list, max_autofix: int = 3) -> dict | None:
+    """Lightweight grounding repair for a few ungrounded cite ids.
+
+    Readable ids are treated as server-verified sources. Missing ids have their cite marker
+    removed. Larger batches fall back to the stricter LLM rewrite path.
+    """
+    if not ungrounded_ids or len(ungrounded_ids) > max_autofix:
+        return None
+    seed_cites, missing = _read_grounding_cites(ungrounded_ids)
+    visible_seed_cites = [
+        {k: v for k, v in cite.items() if not k.startswith("_grounding_")}
+        for cite in seed_cites
+    ]
+    state = _new_state((final_ev.get("read_cites") or []) + visible_seed_cites)
+    fixed = dict(final_ev)
+    fixed["text"] = _strip_cite_markers(final_ev.get("text") or "", missing)
+    fixed["sources"] = state["sources"]
+    fixed["read_cites"] = state["read_cites"]
+    fixed["ungrounded"] = []
+    fixed["grounding_autofixed"] = True
+    fixed["grounding_missing"] = missing
+    return fixed
+
+
+def build_grounding_correction(ungrounded_ids: list) -> tuple:
+    """为接地纠正轮服务端补读"被引用但本轮未 read_node 读过"的节点。
+
+    返回 (seed_cites, corrective_text)：
+    - seed_cites 注入纠正轮 state（_new_state(seed_cites=...)）→ 这些节点算"已读"，
+      纠正答案可合法引用并进数据来源；
+    - corrective_text 作为一条 user 消息回灌，附上能读到的正文，要求模型据此重写、删无据内容。
+    读不到的 id（多半模型凭空标的）只在指令里要求删除相关内容。
+    """
+    seed_cites, missing = _read_grounding_cites(ungrounded_ids)
+    blocks: list = []
+    clean_seed_cites: list = []
+    for cite in seed_cites:
+        title = cite.pop("_grounding_title", "")
+        text = cite.pop("_grounding_text", "")
+        clean_seed_cites.append(cite)
+        blocks.append(f"【{cite.get('handle')}｜{title}】\n{text[:1800]}")
 
     parts = [
         "【系统·引用核对】你上一条回答给下面这些节点标了引用，但本轮你并没有用 read_node "
@@ -203,7 +247,7 @@ def build_grounding_correction(ungrounded_ids: list) -> tuple:
         "「数据来源：[[cite:id1]][[cite:id2]]…」把用到的全部节点列出，不得因为是图就不标来源；"
         "⑤ 不要再引用任何未读过正文的节点。直接输出修订后的完整回答。"
     )
-    return seed_cites, "\n".join(parts)
+    return clean_seed_cites, "\n".join(parts)
 
 
 def events_from_stream(stream, seed_cites=None):

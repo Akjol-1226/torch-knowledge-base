@@ -57,10 +57,50 @@ def test_chat_stream_emits_events(monkeypatch):
     assert r.status_code == 200
     body = r.text
     assert '"type": "tool"' in body
+    assert '"type": "source"' not in body
     assert '"type": "answer"' in body
     # sources 是按文档分组的结构化对象（cite 无 handle/doc_id 时兜底用 doc 名分组）
     assert '"doc_id": "D"' in body
     assert '"section": "S"' in body
+
+
+def test_chat_stream_autofixes_small_ungrounded_without_second_agent_turn(monkeypatch):
+    class UngroundedAgent:
+        def __init__(self):
+            self.calls = 0
+
+        async def astream(self, inp, stream_mode=None, config=None, **kwargs):
+            self.calls += 1
+            chunk = type("CK", (), {"content": "结论[[cite:doc_x:0001]]", "tool_calls": []})()
+            yield ("messages", (chunk, {"langgraph_node": "agent"}))
+
+    class FakeStore:
+        def read_node(self, hid):
+            return {
+                "title": "流程图",
+                "text": "节点列表：J01 进料检验判定……",
+                "cite": {
+                    "doc": "工艺",
+                    "section": "流程图",
+                    "lines": "1-9",
+                    "handle": hid,
+                    "doc_id": "doc_x",
+                },
+            }
+
+    import app.modules.chat.tools as tools_mod
+
+    agent = UngroundedAgent()
+    monkeypatch.setattr(router_mod, "get_agent", lambda: agent)
+    monkeypatch.setattr(tools_mod, "get_store", lambda: FakeStore())
+
+    r = TestClient(app).post("/chat/stream", json={"message": "问题"})
+
+    assert r.status_code == 200
+    body = r.text
+    assert agent.calls == 1
+    assert "核对引用" not in body
+    assert '"handle": "doc_x:0001"' in body
 
 
 class BoomAgent:
