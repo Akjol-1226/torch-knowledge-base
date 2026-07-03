@@ -67,7 +67,9 @@ def vendor(name: str) -> FileResponse:
 
 
 from app.modules.chat.router import router as chat_router  # noqa: E402
+from app.modules.docgen.router import router as docgen_router  # noqa: E402
 from app.modules.ingest.router import router as ingest_router  # noqa: E402
 
 app.include_router(ingest_router)
 app.include_router(chat_router)
+app.include_router(docgen_router)

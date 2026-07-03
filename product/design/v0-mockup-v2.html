@@ -207,6 +207,114 @@
     .btn-danger-ghost { @apply btn-ghost; color: #dc2626; }
     .btn-danger-ghost:hover { color: #b91c1c; background: rgba(220,38,38,0.06); }
 
+    .docgen-plan-card {
+      border: 1px solid #ddd4f5;
+      border-radius: 16px;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 10px 30px -18px rgba(40,30,80,0.25);
+    }
+    .docgen-plan-head {
+      padding: 12px 15px;
+      background: linear-gradient(180deg,#f7f4ff,#fff);
+      border-bottom: 1px solid rgba(28,24,56,.06);
+    }
+    .docgen-plan-item {
+      display: flex;
+      gap: 10px;
+      padding: 11px 15px;
+      border-top: 1px solid rgba(28,24,56,.05);
+      transition: background .12s, opacity .12s;
+    }
+    .docgen-plan-item:hover { background: #fbfaff; }
+    .docgen-plan-item.off { opacity: .48; }
+    .docgen-plan-chk {
+      width: 17px;
+      height: 17px;
+      border-radius: 5px;
+      border: 1.5px solid #c9bdf0;
+      flex-shrink: 0;
+      margin-top: 2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .12s;
+    }
+    .docgen-plan-chk.on {
+      background: #8b79d4;
+      border-color: #8b79d4;
+    }
+    .docgen-plan-native {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .docgen-plan-loc {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 3px;
+    }
+    .docgen-plan-chg {
+      font-size: 12.5px;
+      color: #334155;
+      line-height: 1.5;
+    }
+    .docgen-plan-old {
+      color: #b91c1c;
+      text-decoration: line-through;
+      text-decoration-color: rgba(185,28,28,.5);
+    }
+    .docgen-plan-new {
+      color: #6d28d9;
+      font-weight: 600;
+    }
+    .docgen-src-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 999px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .docgen-src-user {
+      background: #efeafb;
+      color: #6b46c1;
+      border: 1px solid #ddd4f5;
+    }
+    .docgen-src-ai {
+      background: #fbf1dc;
+      color: #b07410;
+      border: 1px solid #f0dcb0;
+    }
+    .docgen-plan-note {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+      line-height: 1.45;
+    }
+    .docgen-draft mark.docgen-change-user {
+      background: #dcfce7;
+      color: #166534;
+      padding: 0 2px;
+      border-radius: 4px;
+    }
+    .docgen-draft mark.docgen-change-ai {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 0 2px;
+      border-radius: 4px;
+      border-bottom: 1px dashed #d97706;
+    }
+    .docgen-highlight-active {
+      outline: 2px solid #8b79d4;
+      outline-offset: 2px;
+    }
+    .docgen-unchanged-badge {
+      @apply ml-2 align-middle text-[10px] font-medium text-slate-400;
+    }
+
     /* 输入框（共用） */
     .input-base {
       @apply w-full rounded-lg px-4 py-2.5 text-sm text-slate-700 outline-none;
@@ -359,6 +467,10 @@
           <a class="nav-item" data-view="kb-list" title="知识库">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H6a2 2 0 00-2 2z"/></svg>
             <span class="nav-label">知识库</span>
+          </a>
+          <a class="nav-item" data-view="doc-generate" title="生成文档">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            <span class="nav-label">生成文档</span>
           </a>
         </div>
 
@@ -617,6 +729,63 @@
 
           <div id="kb-list-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             <p class="text-sm text-slate-400 py-8 text-center">加载中…</p>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- 视图 7 · 基于历史蓝本生成新文档 -->
+      <!-- ============================================================== -->
+      <section data-view="doc-generate" class="view-pane hidden flex-1 min-h-0 flex gap-4 animate-enter">
+        <section class="w-[42%] min-w-[360px] glass-card rounded-3xl flex flex-col overflow-hidden">
+          <div class="px-6 pt-4 pb-3 flex items-center justify-between flex-shrink-0">
+            <div class="min-w-0">
+              <h1 class="text-lg font-semibold text-slate-800 tracking-tight">生成文档</h1>
+              <p id="docgen-status" class="text-xs text-slate-400 mt-1">选择历史蓝本</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="docgen-refresh" class="btn-ghost !py-1.5 !px-3 text-xs">刷新</button>
+              <button id="docgen-stop" class="btn-ghost !py-1.5 !px-3 text-xs hidden">停止</button>
+              <button id="docgen-reset" class="btn-ghost !py-1.5 !px-3 text-xs hidden">重选蓝本</button>
+            </div>
+          </div>
+
+          <div id="docgen-pick" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 pb-6">
+            <div id="docgen-blueprints" class="grid grid-cols-1 gap-3">
+              <p class="text-sm text-slate-400 py-8 text-center">加载中…</p>
+            </div>
+          </div>
+
+          <div id="docgen-work" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div class="px-6 pb-3 flex-shrink-0">
+              <p id="docgen-blueprint-title" class="text-sm font-semibold text-slate-800 truncate">蓝本</p>
+            </div>
+            <div id="docgen-scroll" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div id="docgen-stream" class="px-6 pb-4 space-y-3"></div>
+              <div id="docgen-plan-slot" class="px-6 pb-4"></div>
+            </div>
+            <div class="px-6 pb-6 flex-shrink-0">
+              <textarea id="docgen-input" class="input-base min-h-[86px]" placeholder="描述新文档要改什么，例如：改成 1206 规格，其它框架沿用。"></textarea>
+              <div class="flex justify-end mt-2">
+                <button id="docgen-send" class="btn-primary">生成改动清单</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="flex-1 min-w-0 glass-card rounded-3xl flex flex-col overflow-hidden">
+          <div class="px-6 pt-4 pb-3 flex items-center justify-between gap-3 flex-shrink-0">
+            <div class="min-w-0">
+              <h2 id="docgen-draft-title" class="text-lg font-semibold text-slate-800 tracking-tight truncate">草稿预览</h2>
+              <p id="docgen-draft-badge" class="text-xs text-slate-400 mt-1">未生成</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button id="docgen-next-highlight" class="btn-ghost !py-1.5 !px-3 text-xs hidden">下一个高亮</button>
+              <button id="docgen-copy" class="btn-primary !py-1.5 !px-3 text-xs hidden">复制全文</button>
+            </div>
+          </div>
+          <div id="docgen-draft" class="docgen-draft md flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-6 text-sm text-slate-700 leading-relaxed bg-white/30">
+            <p class="text-slate-400">选择蓝本后显示结构预览</p>
           </div>
         </section>
       </section>
@@ -2040,6 +2209,436 @@
     }));
     document.getElementById('queue-refresh')?.addEventListener('click', loadTasks);
 
+    /* ============================================================
+       14. B1 文档生成：蓝本选择 / 改动清单 / 草稿预览
+    ============================================================ */
+    const docgenState = {
+      sessionId: null,
+      blueprint: null,
+      plan: [],
+      requestSeq: 0,
+      patchSeq: 0,
+      draftSeq: 0,
+      patchPending: false,
+      abortController: null,
+      copyText: '',
+      highlightIndex: -1,
+    };
+
+    async function docgenFetchJson(url, options){
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      return data;
+    }
+    function docgenSetStopVisible(visible){
+      document.getElementById('docgen-stop')?.classList.toggle('hidden', !visible);
+    }
+    function docgenAbortActiveFetch(){
+      if(docgenState.abortController){
+        docgenState.abortController.abort();
+        docgenState.abortController = null;
+      }
+      docgenSetStopVisible(false);
+    }
+    function docgenBeginAbortableRequest(){
+      docgenAbortActiveFetch();
+      const controller = new AbortController();
+      docgenState.abortController = controller;
+      docgenSetStopVisible(true);
+      return controller;
+    }
+    function docgenFinishAbortableRequest(controller){
+      if(docgenState.abortController === controller){
+        docgenState.abortController = null;
+        docgenSetStopVisible(false);
+      }
+    }
+    function docgenIsAbortError(err){
+      return err && err.name === 'AbortError';
+    }
+    function stopDocgenRequest(){
+      if(!docgenState.abortController) return;
+      const wasStartingSession = !docgenState.sessionId;
+      docgenAbortActiveFetch();
+      docgenState.requestSeq += 1;
+      docgenState.patchSeq += 1;
+      docgenState.draftSeq += 1;
+      docgenState.patchPending = false;
+      docgenSetBusy(false);
+      if(wasStartingSession){
+        docgenState.blueprint = null;
+        docgenState.plan = [];
+        document.getElementById('docgen-work')?.classList.add('hidden');
+        document.getElementById('docgen-pick')?.classList.remove('hidden');
+        document.getElementById('docgen-reset')?.classList.add('hidden');
+        document.getElementById('docgen-plan-slot').innerHTML = '';
+        document.getElementById('docgen-draft').innerHTML = '<p class="text-slate-400">选择蓝本后显示结构预览</p>';
+        document.getElementById('docgen-draft-title').textContent = '草稿预览';
+        resetDocgenDraftUi();
+        docgenSetStatus('已停止，可重新选择蓝本');
+      }else{
+        docgenSetStatus('已停止');
+      }
+    }
+    function docgenSetStatus(text){
+      const el = document.getElementById('docgen-status');
+      if(el) el.textContent = text;
+    }
+    function docgenSetBusy(busy){
+      ['docgen-send','docgen-refresh'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.disabled = !!busy;
+      });
+      document.querySelectorAll('#docgen-plan-slot input, #docgen-plan-slot button').forEach(el => {
+        el.disabled = !!busy || docgenState.patchPending;
+      });
+    }
+    function docgenTextMsg(role, text){
+      const box = document.getElementById('docgen-stream');
+      if(!box) return;
+      const el = document.createElement('div');
+      el.className = role === 'user'
+        ? 'ml-10 rounded-2xl bg-white/80 border border-white/90 px-4 py-3 text-sm text-slate-700'
+        : 'mr-6 rounded-2xl bg-white/55 border border-white/80 px-4 py-3 text-sm text-slate-700 leading-relaxed';
+      el.textContent = text || '';
+      box.appendChild(el);
+      const scroller = document.getElementById('docgen-scroll') || box;
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+    function docgenMdToHtml(markdown){
+      const marks = [];
+      const protectedText = String(markdown || '').replace(
+        /<mark class="(docgen-change-user|docgen-change-ai)">([\s\S]*?)<\/mark>/g,
+        (_, cls, body) => {
+          marks.push({cls, body});
+          return '@@DOCGEN_MARK_' + (marks.length - 1) + '@@';
+        }
+      );
+      let html = mdToHtml(protectedText);
+      html = html.replace(/@@DOCGEN_MARK_(\d+)@@/g, (_, i) => {
+        const mark = marks[Number(i)];
+        return mark ? `<mark class="${mark.cls}">${mark.body}</mark>` : '';
+      });
+      return window.DOMPurify ? DOMPurify.sanitize(html) : _mdLite(markdown);
+    }
+    function docgenAddUnchangedBadges(root){
+      if(!root) return;
+      root.querySelectorAll('h1,h2,h3').forEach(h => {
+        if(h.querySelector('mark')) return;
+        if(h.querySelector('.docgen-unchanged-badge')) return;
+        const badge = document.createElement('span');
+        badge.className = 'docgen-unchanged-badge';
+        badge.textContent = '原样沿用';
+        h.appendChild(badge);
+      });
+    }
+    function resetDocgenDraftUi(){
+      docgenState.copyText = '';
+      docgenState.highlightIndex = -1;
+      document.getElementById('docgen-copy')?.classList.add('hidden');
+      document.getElementById('docgen-next-highlight')?.classList.add('hidden');
+      const badge = document.getElementById('docgen-draft-badge');
+      if(badge) badge.textContent = '未生成';
+    }
+    function markDocgenDraftStale(){
+      docgenState.copyText = '';
+      docgenState.highlightIndex = -1;
+      docgenState.draftSeq += 1;
+      document.getElementById('docgen-copy')?.classList.add('hidden');
+      document.getElementById('docgen-next-highlight')?.classList.add('hidden');
+      document.getElementById('docgen-draft-badge').textContent = '待重新生成';
+      document.getElementById('docgen-draft').innerHTML = '<p class="text-slate-400">改动清单已更新，请点击“确认生成初稿”刷新右侧预览。</p>';
+    }
+    function docgenPlanDisplayText(value){
+      const text = String(value || '');
+      const cell = text.match(/^\s*<(td|th)\b[^>]*>([\s\S]*?)<\/\1>\s*$/i);
+      return (cell ? cell[2] : text).replace(/<[^>]+>/g, '').trim();
+    }
+    function docgenPlanSourceClass(item){
+      return item.source_type === 'ai' ? 'docgen-src-ai' : 'docgen-src-user';
+    }
+    function docgenPlanSourceLabel(item){
+      return item.source_label || (item.source_type === 'ai' ? 'AI推理' : '你指定');
+    }
+    async function loadDocgenBlueprints(){
+      const box = document.getElementById('docgen-blueprints');
+      if(!box) return;
+      box.innerHTML = '<p class="text-sm text-slate-400 py-8 text-center">加载中…</p>';
+      try{
+        const data = await docgenFetchJson(API_BASE + '/docgen/blueprints');
+        const items = data.items || [];
+        if(!items.length){
+          box.innerHTML = '<p class="text-sm text-slate-400 py-8 text-center">暂无可用蓝本文档</p>';
+          return;
+        }
+        box.innerHTML = items.map(it => `
+          <button class="glass-soft rounded-2xl p-4 text-left hover:bg-white/80 transition" data-docgen-blueprint="${escapeHtml(it.doc_id)}">
+            <p class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(it.doc_name)}</p>
+            <p class="text-xs text-slate-400 mt-1 truncate">${escapeHtml(it.doc_description || '')}</p>
+            <p class="text-xs text-slate-500 mt-2 truncate">所属知识库：${escapeHtml(it.kb || 'default')}</p>
+            <div class="grid grid-cols-2 gap-2 text-xs text-slate-500 mt-3">
+              <span>${Number(it.chapter_count || 0)} 章</span>
+              <span>${Number(it.node_count || 0)} 节点</span>
+            </div>
+          </button>
+        `).join('');
+        box.querySelectorAll('[data-docgen-blueprint]').forEach(btn => {
+          btn.addEventListener('click', () => startDocgenSession(btn.dataset.docgenBlueprint));
+        });
+      }catch(err){
+        box.innerHTML = `<p class="text-sm text-red-500 py-8 text-center">加载失败：${escapeHtml(err.message)}</p>`;
+      }
+    }
+    function refreshDocgenCurrent(){
+      if(docgenState.blueprint?.doc_id){
+        startDocgenSession(docgenState.blueprint.doc_id);
+        return;
+      }
+      loadDocgenBlueprints();
+    }
+    async function startDocgenSession(docId){
+      const seq = ++docgenState.requestSeq;
+      const controller = docgenBeginAbortableRequest();
+      docgenSetBusy(true);
+      resetDocgenDraftUi();
+      docgenState.sessionId = null;
+      docgenState.draftSeq += 1;
+      docgenState.patchPending = false;
+      docgenState.plan = [];
+      document.getElementById('docgen-plan-slot').innerHTML = '';
+      document.getElementById('docgen-stream').innerHTML = '';
+      document.getElementById('docgen-pick')?.classList.add('hidden');
+      document.getElementById('docgen-work')?.classList.remove('hidden');
+      document.getElementById('docgen-reset')?.classList.remove('hidden');
+      document.getElementById('docgen-draft').innerHTML = '<p class="text-slate-400">请稍候…</p>';
+      docgenSetStatus('概括蓝本中…');
+      try{
+        const data = await docgenFetchJson(API_BASE + '/docgen/sessions', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({doc_id:docId}),
+          signal:controller.signal,
+        });
+        if(seq !== docgenState.requestSeq) return;
+        docgenState.sessionId = data.session_id;
+        docgenState.blueprint = data.blueprint;
+        document.getElementById('docgen-blueprint-title').textContent = '蓝本：' + (data.blueprint?.doc_name || docId);
+        document.getElementById('docgen-draft-title').textContent = data.blueprint?.doc_name || '蓝本预览';
+        docgenSetStatus('等待需求');
+        docgenTextMsg('assistant', `${data.summary || ''}\n\n${data.question || '你想基于它做份什么新文档？'}`);
+        document.getElementById('docgen-draft').innerHTML = mdToHtml(
+          (data.outline || []).map(x => `${'#'.repeat(Math.min(x.depth || 1, 4))} ${x.title}\n\n${x.summary || ''}`).join('\n\n')
+        );
+      }catch(err){
+        if(docgenIsAbortError(err)) return;
+        if(seq !== docgenState.requestSeq) return;
+        docgenSetStatus('概括失败');
+        docgenTextMsg('assistant', '失败：' + err.message);
+      }finally{
+        docgenFinishAbortableRequest(controller);
+        if(seq === docgenState.requestSeq) docgenSetBusy(false);
+      }
+    }
+    function renderDocgenPlan(){
+      const slot = document.getElementById('docgen-plan-slot');
+      const items = docgenState.plan || [];
+      if(!slot) return;
+      if(!items.length){
+        slot.innerHTML = '<div class="docgen-plan-card p-4 text-sm text-slate-500">没有生成可确认的改动项。</div>';
+        return;
+      }
+      const selectedCount = items.filter(it => it.selected).length;
+      slot.innerHTML = `<div class="docgen-plan-card">
+        <div class="docgen-plan-head text-[12px] text-slate-500">
+          共 <b class="text-slate-700">${selectedCount}</b> 处改动 ·
+          <span class="docgen-src-tag docgen-src-user">你指定</span> 直接替换 ·
+          <span class="docgen-src-tag docgen-src-ai">AI推理</span> 需你重点核对
+        </div>
+        ${items.map(it => `
+          <label class="docgen-plan-item ${it.selected ? '' : 'off'}">
+            <input type="checkbox" data-docgen-plan="${escapeHtml(it.id)}" ${it.selected ? 'checked' : ''} class="docgen-plan-native">
+            <span class="docgen-plan-chk ${it.selected ? 'on' : ''}">
+              ${it.selected ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="docgen-plan-loc">${escapeHtml(it.location || '')}</span>
+              <span class="docgen-plan-chg block">
+                <span class="docgen-plan-old">${escapeHtml(docgenPlanDisplayText(it.old_text))}</span>
+                →
+                <span class="docgen-plan-new">${escapeHtml(docgenPlanDisplayText(it.new_text))}</span>
+                <span class="docgen-src-tag ${docgenPlanSourceClass(it)}">${escapeHtml(docgenPlanSourceLabel(it))}</span>
+              </span>
+              ${it.reason ? `<span class="docgen-plan-note block">${escapeHtml(it.reason)}</span>` : ''}
+              ${it.calculation_note ? `<span class="docgen-plan-note block text-amber-700">${escapeHtml(it.calculation_note)}</span>` : ''}
+              ${it.warning ? `<span class="docgen-plan-note block text-red-500">${escapeHtml(it.warning)}</span>` : ''}
+            </span>
+          </label>
+        `).join('')}
+        <div class="flex justify-end gap-2 px-4 py-4">
+          <button class="btn-ghost" data-docgen-adjust>继续调整</button>
+          <button class="btn-primary" data-docgen-generate>确认生成初稿</button>
+        </div>
+      </div>`;
+      slot.querySelectorAll('[data-docgen-plan]').forEach(chk => {
+        chk.addEventListener('change', () => patchDocgenPlanFromSlot(slot));
+      });
+      slot.querySelector('[data-docgen-adjust]')?.addEventListener('click', () => {
+        document.getElementById('docgen-input')?.focus();
+      });
+      slot.querySelector('[data-docgen-generate]')?.addEventListener('click', generateDocgenDraft);
+      const scroller = document.getElementById('docgen-scroll');
+      if(scroller) scroller.scrollTop = scroller.scrollHeight;
+    }
+    async function patchDocgenPlanFromSlot(slot){
+      const patchSeq = ++docgenState.patchSeq;
+      const items = Array.from(slot.querySelectorAll('[data-docgen-plan]')).map(chk => ({
+        id: chk.dataset.docgenPlan,
+        selected: chk.checked,
+      }));
+      docgenState.plan = docgenState.plan.map(it => {
+        const next = items.find(x => x.id === it.id);
+        return next ? {...it, selected: next.selected} : it;
+      });
+      renderDocgenPlan();
+      markDocgenDraftStale();
+      docgenState.patchPending = true;
+      docgenSetBusy(true);
+      try{
+        const data = await docgenFetchJson(
+          API_BASE + '/docgen/sessions/' + encodeURIComponent(docgenState.sessionId) + '/plan',
+          {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items})}
+        );
+        if(patchSeq === docgenState.patchSeq){
+          docgenState.plan = data.plan || docgenState.plan;
+          renderDocgenPlan();
+        }
+      }finally{
+        if(patchSeq === docgenState.patchSeq){
+          docgenState.patchPending = false;
+          docgenSetBusy(false);
+        }
+      }
+    }
+    async function sendDocgenRequirement(){
+      const input = document.getElementById('docgen-input');
+      const msg = (input?.value || '').trim();
+      if(!msg){ alert('先描述新文档要改什么'); return; }
+      if(!docgenState.sessionId){ alert('请先选择蓝本'); return; }
+      const seq = ++docgenState.requestSeq;
+      const controller = docgenBeginAbortableRequest();
+      input.value = '';
+      docgenTextMsg('user', msg);
+      docgenSetStatus('正在生成改动清单…');
+      docgenSetBusy(true);
+      try{
+        const data = await docgenFetchJson(
+          API_BASE + '/docgen/sessions/' + encodeURIComponent(docgenState.sessionId) + '/plan',
+          {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg}), signal:controller.signal}
+        );
+        if(seq !== docgenState.requestSeq) return;
+        docgenState.plan = data.plan || [];
+        docgenSetStatus('改动清单待确认');
+        renderDocgenPlan();
+        markDocgenDraftStale();
+      }catch(err){
+        if(docgenIsAbortError(err)) return;
+        if(seq !== docgenState.requestSeq) return;
+        docgenSetStatus('生成清单失败');
+        docgenTextMsg('assistant', '失败：' + err.message);
+      }finally{
+        docgenFinishAbortableRequest(controller);
+        if(seq === docgenState.requestSeq) docgenSetBusy(false);
+      }
+    }
+    async function generateDocgenDraft(){
+      if(docgenState.patchPending) return;
+      const seq = docgenState.requestSeq;
+      const draftSeq = ++docgenState.draftSeq;
+      const sessionId = docgenState.sessionId;
+      const slot = document.getElementById('docgen-plan-slot');
+      const selected = Array.from(slot?.querySelectorAll('[data-docgen-plan]') || [])
+        .filter(chk => chk.checked)
+        .map(chk => chk.dataset.docgenPlan);
+      const controller = docgenBeginAbortableRequest();
+      docgenSetStatus('正在生成初稿…');
+      docgenSetBusy(true);
+      try{
+        const data = await docgenFetchJson(
+          API_BASE + '/docgen/sessions/' + encodeURIComponent(sessionId) + '/draft',
+          {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({accepted_item_ids:selected}), signal:controller.signal}
+        );
+        if(seq !== docgenState.requestSeq || draftSeq !== docgenState.draftSeq) return;
+        if(!data.copy_text) throw new Error('后端未返回 copy_text，无法保证复制纯文本');
+        if(!data.highlighted_markdown) throw new Error('后端未返回 highlighted_markdown，无法展示初稿预览');
+        docgenState.copyText = data.copy_text;
+        document.getElementById('docgen-draft-title').textContent = data.title || '新文档初稿';
+        document.getElementById('docgen-draft-badge').textContent = '初稿 · 待审核';
+        document.getElementById('docgen-copy')?.classList.remove('hidden');
+        document.getElementById('docgen-next-highlight')?.classList.toggle('hidden', !(Number(data.highlight_count || 0) > 0));
+        const draftBox = document.getElementById('docgen-draft');
+        draftBox.innerHTML = docgenMdToHtml(data.highlighted_markdown);
+        docgenAddUnchangedBadges(draftBox);
+        docgenState.highlightIndex = -1;
+        docgenSetStatus('初稿已生成');
+      }catch(err){
+        if(docgenIsAbortError(err)) return;
+        if(seq !== docgenState.requestSeq || draftSeq !== docgenState.draftSeq) return;
+        docgenSetStatus('生成初稿失败');
+        docgenTextMsg('assistant', '失败：' + err.message);
+      }finally{
+        docgenFinishAbortableRequest(controller);
+        if(seq === docgenState.requestSeq && draftSeq === docgenState.draftSeq){
+          docgenSetBusy(false);
+        }
+      }
+    }
+    document.getElementById('docgen-refresh')?.addEventListener('click', refreshDocgenCurrent);
+    document.getElementById('docgen-stop')?.addEventListener('click', stopDocgenRequest);
+    document.getElementById('docgen-send')?.addEventListener('click', sendDocgenRequirement);
+    document.getElementById('docgen-input')?.addEventListener('keydown', e => {
+      if(e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229){
+        e.preventDefault();
+        sendDocgenRequirement();
+      }
+    });
+    document.getElementById('docgen-reset')?.addEventListener('click', () => {
+      docgenAbortActiveFetch();
+      docgenState.requestSeq += 1;
+      docgenState.draftSeq += 1;
+      docgenState.sessionId = null;
+      docgenState.blueprint = null;
+      docgenState.plan = [];
+      docgenState.patchPending = false;
+      docgenState.copyText = '';
+      docgenState.highlightIndex = -1;
+      document.getElementById('docgen-work')?.classList.add('hidden');
+      document.getElementById('docgen-pick')?.classList.remove('hidden');
+      document.getElementById('docgen-reset')?.classList.add('hidden');
+      document.getElementById('docgen-plan-slot').innerHTML = '';
+      resetDocgenDraftUi();
+      loadDocgenBlueprints();
+    });
+    document.getElementById('docgen-copy')?.addEventListener('click', async () => {
+      try{
+        await navigator.clipboard.writeText(docgenState.copyText || '');
+        alert('已复制全文');
+      }catch(e){
+        window.prompt('自动复制失败，请手动复制以下内容：', docgenState.copyText || '');
+      }
+    });
+    document.getElementById('docgen-next-highlight')?.addEventListener('click', () => {
+      const box = document.getElementById('docgen-draft');
+      const marks = Array.from(box?.querySelectorAll('.docgen-change-user, .docgen-change-ai') || []);
+      if(!marks.length) return;
+      marks.forEach(m => m.classList.remove('docgen-highlight-active'));
+      docgenState.highlightIndex = (docgenState.highlightIndex + 1) % marks.length;
+      const current = marks[docgenState.highlightIndex];
+      current.classList.add('docgen-highlight-active');
+      current.scrollIntoView({block:'center', behavior:'smooth'});
+      document.getElementById('docgen-next-highlight').textContent = `下一个高亮 ${docgenState.highlightIndex + 1}/${marks.length}`;
+    });
+
     // 进入相关页时自动拉取
     const _origSwitchPage = switchPage;
     switchPage = function(name){
@@ -2048,6 +2647,7 @@
       if(name === 'kb-review-list') loadReviewList();
       if(name === 'kb-list') loadKbList();
       if(name === 'kb-queue') startQueuePolling();
+      if(name === 'doc-generate' && !docgenState.sessionId) loadDocgenBlueprints();
     };
     loadKbOptions();  // 启动时填充对话检索范围下拉
     loadConversations();  // 启动时填充侧栏会话列表
