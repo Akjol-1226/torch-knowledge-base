@@ -1,5 +1,8 @@
 # v0 实现状态（对照 PRD §3.4 功能完整性 checklist）
 
+> **历史快照说明**：本文最后更新于 2026-06-22，已不是当前权威技术状态。  
+> 当前实现功能请优先看 `docs/current-implemented-features.md`；完整交接上下文请看 `docs/火炬知识库代码文档以及上下文.md`；B1/B2 详细实施方案请看 `docs/plans/2026-07-02-b1-doc-generation-implementation-plan.md` 和 `docs/plans/2026-07-02-b2-module-edit-implementation-plan.md`。
+>
 > **用途**：记录代码**实际实现到哪一步**，避免"界面看起来像做了、其实后端没做"的误解。
 > **权威进度/排期看飞书**；本表是**代码能力快照**——每完成或改动一项功能，同步更新这里。
 > **最后更新**：2026-06-22
