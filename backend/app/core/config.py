@@ -31,6 +31,12 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./torch_kb.db"
 
+    # v0 尚未接正式 RBAC。开发环境默认给一个管理员占位用户，便于测试 B2 编辑功能；
+    # 部署/演示时可用 DEV_AUTH_IS_ADMIN=false 临时降级为只读。
+    dev_auth_user_id: int = 1
+    dev_auth_username: str = "dev-admin"
+    dev_auth_is_admin: bool = True
+
     # 对话系统提示词的路径 override（默认空 → 用 modules/chat/prompts/system.md）。
     # 提示词正文是版本化资产、放仓库文件里（改 .md 即可，重启生效）；这里只存可选指针，
     # 用于切换/灰度不同提示词，不要把大段正文塞进 env。

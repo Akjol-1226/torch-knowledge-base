@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 # 必须 import 所有 model 模块，让 SQLModel.metadata 收集 table 定义。
 # 不导入 = 测试用 in-memory engine 跑 create_all 时这些表不会被创建。
+from app.modules.docedit import models as _docedit_models  # noqa: F401
 from app.modules.ingest import models as _ingest_models  # noqa: F401
 
 

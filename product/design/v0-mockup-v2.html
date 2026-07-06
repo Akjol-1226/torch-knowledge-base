@@ -390,6 +390,23 @@
     .tree-leaf-md td, .tree-leaf-md th { border: 1px solid #e2e8f0; padding: 3px 6px; }
     .tree-leaf-loading, .tree-leaf-err { font-size: 12px; color: #94a3b8; margin: 0; }
     .tree-leaf-err { color: #ef4444; }
+    .tree-touched { font-size: 10px; color: #047857; background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.18); padding: 1px 7px; border-radius: 999px; }
+    .tree-edit-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+    .tree-edit-hint { font-size: 11px; color: #64748b; }
+    .tree-member-list { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid rgba(148,163,184,.22); display: flex; flex-direction: column; gap: 8px; }
+    .tree-member-item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid rgba(148,163,184,.24); border-radius: 8px; background: rgba(255,255,255,.62); }
+    .tree-member-title { font-size: 12px; font-weight: 600; color: #334155; }
+    .tree-member-snippet { margin-top: 2px; font-size: 11px; color: #64748b; line-height: 1.45; }
+    .tree-edit-textarea { width: 100%; min-height: 180px; resize: vertical; border: 1px solid #dbe3ef; border-radius: 8px; background: rgba(255,255,255,.88); padding: 10px 12px; font-size: 12.5px; line-height: 1.65; color: #334155; outline: none; }
+    .tree-edit-textarea:focus { border-color: #8b79d4; box-shadow: 0 0 0 3px rgba(139,121,212,.12); }
+    .tree-ai-box { margin-top: 10px; padding: 10px; background: rgba(255,255,255,.68); border: 1px solid rgba(28,24,56,.08); border-radius: 8px; }
+    .tree-ai-input { width: 100%; min-height: 68px; resize: vertical; border: 1px solid #dbe3ef; border-radius: 8px; background: white; padding: 8px 10px; font-size: 12px; line-height: 1.55; outline: none; }
+    .tree-diff { margin-top: 10px; padding: 10px; border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; font-size: 12.5px; line-height: 1.7; color: #334155; white-space: pre-wrap; }
+    .tree-diff del { background: #fee2e2; color: #991b1b; text-decoration: line-through; padding: 0 2px; border-radius: 3px; }
+    .tree-diff ins { background: #dcfce7; color: #166534; text-decoration: none; padding: 0 2px; border-radius: 3px; }
+    .tree-history-list { display: flex; flex-direction: column; gap: 10px; }
+    .tree-history-card { background: rgba(255,255,255,.74); border: 1px solid rgba(28,24,56,.08); border-radius: 8px; padding: 12px; }
+    .tree-history-meta { font-size: 11px; color: #64748b; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
     /* 拖拽上传：文件拖到区域上方时高亮 */
     #upload-drop.drop-active { background: rgba(139,121,212,.12); border-color: #8b79d4; box-shadow: 0 0 0 3px rgba(139,121,212,.15) inset; }
     /* 文档查看弹窗：marked 渲染的 md（含 HTML 表格）基础排版 */
@@ -826,10 +843,14 @@
     <div class="absolute inset-4 md:inset-10 surface-modal rounded-3xl flex flex-col overflow-hidden">
       <div class="px-6 py-4 border-b border-[rgba(28,24,56,0.07)] flex items-center justify-between gap-4">
         <div class="min-w-0">
-          <h2 id="tree-modal-title" class="text-base font-semibold text-slate-800 truncate">文档结构</h2>
+          <div class="flex items-center gap-2 min-w-0">
+            <h2 id="tree-modal-title" class="text-base font-semibold text-slate-800 truncate">文档结构</h2>
+            <span id="tree-version-badge" class="hidden text-[10px] font-semibold text-slate-500 bg-white/70 border border-white/90 rounded-full px-2 py-0.5 flex-shrink-0"></span>
+          </div>
           <p id="tree-modal-sub" class="text-[11px] text-slate-400 mt-0.5"></p>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
+          <button id="tree-history" class="btn-ghost !py-1 !px-2.5 text-[11px]">修改历史</button>
           <button id="tree-reparse" class="btn-primary !py-1 !px-2.5 text-[11px]" title="用原 PDF 重新跑完整入库流程">重新解析</button>
           <button id="tree-expand-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">展开全部</button>
           <button id="tree-collapse-all" class="btn-ghost !py-1 !px-2.5 text-[11px]">收起全部</button>
@@ -1949,8 +1970,16 @@
     let currentTreeDocId = null;
     let currentTreeDocName = '';
     let currentTreeHasPdf = null;
+    let currentTreeVersion = null;
+    let currentTreeCanEdit = false;
+    let currentTreeActiveReparse = false;
+    let currentTreeRoots = [];
+    let currentTreeKb = '';
+    let treeViewMode = 'structure';
     let treeOpenSeq = 0;
     const treeReparseSubmittedDocs = new Set();
+    const treeNodeUi = new Map();
+    const treeTouchedNodes = new Set();
     function isTreeModalOpen(){ return !!treeModal && !treeModal.classList.contains('hidden'); }
     function closeTreeModal(){
       if(treeModal) treeModal.classList.add('hidden');
@@ -1958,6 +1987,15 @@
       currentTreeDocId = null;
       currentTreeDocName = '';
       currentTreeHasPdf = null;
+      currentTreeVersion = null;
+      currentTreeCanEdit = false;
+      currentTreeActiveReparse = false;
+      currentTreeRoots = [];
+      currentTreeKb = '';
+      treeViewMode = 'structure';
+      treeNodeUi.clear();
+      treeTouchedNodes.clear();
+      updateTreeVersionBadge();
       setTreeReparseState(null);
     }
     function setTreeReparseState(hasPdf, message){
@@ -1987,6 +2025,132 @@
       return null;
     }
     function countTreeNodes(nodes){ let c = 0; (nodes || []).forEach(n => { c += 1 + countTreeNodes(n.children); }); return c; }
+    function treeRequestStillCurrent(requestSeq, docId){
+      return requestSeq === treeOpenSeq && currentTreeDocId === docId && isTreeModalOpen();
+    }
+    function isTreeRequestCurrent(requestSeq, docId, handle, detail){
+      if(!treeRequestStillCurrent(requestSeq, docId)) return false;
+      if(handle && detail && detail.dataset.handle !== handle) return false;
+      return true;
+    }
+    function ensureTreeNodeUi(handle){
+      if(!treeNodeUi.has(handle)){
+        treeNodeUi.set(handle, {
+          mode:'view', text:'', readHtml:'', textHash:'', baseVersion:currentTreeVersion || 1,
+          editable:false, editableReason:null, canEdit:false, changed:false, summaryStatus:'clean',
+          pending:null, aiInstruction:'', opSeq:0, error:'', detail:null,
+          physical:false, parentMergedHandle:null, mergedMembers:[]
+        });
+      }
+      return treeNodeUi.get(handle);
+    }
+    function beginTreeNodeOp(handle){
+      const u = ensureTreeNodeUi(handle);
+      u.opSeq = (u.opSeq || 0) + 1;
+      return u.opSeq;
+    }
+    function isTreeNodeOpCurrent(handle, opSeq){
+      const u = treeNodeUi.get(handle);
+      return !!u && u.opSeq === opSeq;
+    }
+    function sanitizeDoceditDiff(html){
+      if(window.DOMPurify){
+        return DOMPurify.sanitize(String(html || ''), {ALLOWED_TAGS:['del','ins','br'], ALLOWED_ATTR:[]});
+      }
+      return escapeHtml(String(html || ''));
+    }
+    function doceditNodeUrl(handle, suffix, physical){
+      return API_BASE + '/docedit/nodes/' + encodeURIComponent(handle) + (suffix || '') + (physical ? '?physical=1' : '');
+    }
+    function treePlainSnippet(text, limit){
+      const plain = String(text || '').replace(/^#{1,6}\s.*$/gm, '').replace(/\s+/g, ' ').trim();
+      if(!plain) return '（无正文）';
+      return plain.length > limit ? plain.slice(0, limit) + '…' : plain;
+    }
+    async function treeFetchJson(url, options){
+      const res = await fetch(url, options || {});
+      const text = await res.text();
+      let data = {};
+      if(text){
+        try{ data = JSON.parse(text); }
+        catch(e){ throw new Error((res.ok ? '接口返回非 JSON：' : 'HTTP ' + res.status + '：') + text.slice(0, 200)); }
+      }
+      if(!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      return data;
+    }
+    async function loadTreeEditState(docId, requestSeq){
+      try{
+        const d = await treeFetchJson(API_BASE + '/docedit/documents/' + encodeURIComponent(docId) + '/state');
+        if(!treeRequestStillCurrent(requestSeq, docId)) return;
+        currentTreeVersion = d.version || 1;
+        currentTreeCanEdit = d.can_edit === true;
+        currentTreeActiveReparse = d.active_reparse === true;
+        treeTouchedNodes.clear();
+        (d.changed_node_handles || d.changed_node_ids || []).forEach(h => treeTouchedNodes.add(h));
+      }catch(e){
+        if(!treeRequestStillCurrent(requestSeq, docId)) return;
+        currentTreeVersion = null;
+        currentTreeCanEdit = false;
+        currentTreeActiveReparse = false;
+        treeTouchedNodes.clear();
+      }
+      updateTreeVersionBadge();
+    }
+    function updateTreeVersionBadge(){
+      const badge = document.getElementById('tree-version-badge');
+      if(!badge) return;
+      if(!currentTreeVersion){
+        badge.classList.add('hidden');
+        badge.textContent = '';
+        return;
+      }
+      badge.classList.remove('hidden');
+      badge.textContent = 'v' + currentTreeVersion + (currentTreeActiveReparse ? ' · 解析中' : '');
+    }
+    function updateTreeSubline(){
+      const sub = document.getElementById('tree-modal-sub');
+      if(!sub || !currentTreeDocId) return;
+      const pdfText = currentTreeHasPdf === true ? '' : (currentTreeHasPdf === false ? ' · 无原 PDF' : ' · 原 PDF 状态未知（接口版本未更新/请重启后端）');
+      const submittedText = treeReparseSubmittedDocs.has(currentTreeDocId) ? ' · 重新解析已提交' : '';
+      const editText = currentTreeActiveReparse ? ' · 正在重新解析，暂不能编辑' : (currentTreeCanEdit ? ' · 可编辑' : '');
+      sub.textContent = (currentTreeKb || 'default') + ' · ' + currentTreeRoots.length + ' 章 · ' + countTreeNodes(currentTreeRoots) + ' 节点' + pdfText + submittedText + editText;
+    }
+    function renderTreeStructure(){
+      treeViewMode = 'structure';
+      const historyBtn = document.getElementById('tree-history');
+      if(historyBtn) historyBtn.textContent = '修改历史';
+      const box = document.getElementById('tree-view');
+      if(!box) return;
+      box.innerHTML = '';
+      if(!currentTreeRoots.length){
+        box.innerHTML = '<p class="text-slate-400 py-8 text-center">该文档无结构节点</p>';
+        return;
+      }
+      currentTreeRoots.forEach((n, i) => box.appendChild(makeTreeNode(n, 0, i + 1)));
+    }
+    function setTreeNodeMode(handle, mode){
+      const u = ensureTreeNodeUi(handle);
+      u.mode = mode;
+      u.error = '';
+      if(mode !== 'ai') u.pending = null;
+      renderTreeNodeDetailByHandle(handle);
+    }
+    function renderTreeNodeDetailByHandle(handle){
+      const u = treeNodeUi.get(handle);
+      if(!u || !u.detail) return;
+      renderTreeNodeDetail({id: handle}, u.detail);
+    }
+    function editableReasonText(reason){
+      const map = {
+        not_admin:'当前账号没有编辑权限',
+        container_only:'该节点只有子章节，没有可编辑正文',
+        empty_text:'该节点没有可编辑正文',
+        merged_section:'合并窗口节点请在下方选择具体窗口编辑',
+        active_reparse:'该文档正在重新解析，暂不能编辑',
+        unknown_node:'节点不存在'
+      };
+      return map[reason] || '该节点暂不可编辑';
+    }
     // 递归建可折叠 DOM。depth=0 是章节（带序号、加粗）；其下是附表/子项（📎、淡化）。
     // 默认全部收起 → 初始就是干净的章节清单；摘要走 row 的 title 悬停浮层。
     function makeTreeNode(node, depth, num){
@@ -2003,9 +2167,10 @@
       const iconHtml = (!isChapter && !hasKids) ? '<span class="tree-leaf-ico">📎</span>' : '';
       const win = (node.windows > 1) ? `<span class="tree-win">${node.windows} 段</span>` : '';
       const page = (node.page != null) ? `<span class="tree-page">P${node.page}</span>` : '';
+      const touched = treeTouchedNodes.has(node.id) ? '<span class="tree-touched">改过</span>' : '';
       row.innerHTML = numHtml + caretHtml + iconHtml
         + `<span class="tree-title">${escapeHtml(node.title || '（无标题）')}</span>`
-        + `<span class="tree-meta">${win}${page}</span>`;
+        + `<span class="tree-meta">${touched}${win}${page}</span>`;
       wrap.appendChild(row);
 
       // 合并段（windows>1）本身就有窗口正文，可能同时还挂着附表子节点；纯章节(单段)只展开不出正文。
@@ -2015,11 +2180,12 @@
       const showsText = !hasKids || isSection || !!node.has_text;
 
       // 正文容器在前、子节点容器在后：点开合并段先看它自己的窗口正文，再往下是附表等子节点。
-      let detail = null, loaded = false;
+      let detail = null;
       if(showsText){
         row.classList.add('leaf-clickable');
         detail = document.createElement('div');
         detail.className = 'tree-leaf-detail hidden';
+        detail.dataset.handle = node.id || '';
         wrap.appendChild(detail);
       }
       if(hasKids){
@@ -2035,21 +2201,343 @@
         if(!detail) return;
         const willShow = detail.classList.contains('hidden');
         detail.classList.toggle('hidden');
-        if(!willShow || loaded) return;        // 收起、或已加载过 → 不重复请求
-        detail.innerHTML = '<p class="tree-leaf-loading">加载中…</p>';
-        try{
-          const d = await (await fetch(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(node.id))).json();
-          if(d.error){ detail.innerHTML = '<p class="tree-leaf-err">' + escapeHtml(d.error) + '</p>'; return; }
-          // 查看结构：合并段回的是各窗口正文（members，不含附表），单节点回它自身——整段展示，
-          // 不再按 is_cited 过滤（那是引用面板"只高亮被引句"的逻辑，会让合并段只剩第一段）
-          const items = (d.context || []);
-          const html = items.map(c => mdToHtml(c.text || '')).join('<hr>');
-          detail.innerHTML = '<div class="tree-leaf-md md">' + (html || '（无正文）') + '</div>';
-          renderMathIn(detail);                    // 结构正文里若有 $..$ LaTeX → 公式
-          loaded = true;
-        }catch(e){ detail.innerHTML = '<p class="tree-leaf-err">加载失败</p>'; }
+        if(!willShow) return;
+        await loadTreeNodeDetail(node, detail, treeOpenSeq);
       });
       return wrap;
+    }
+    async function loadTreeNodeReadOnlyFromChat(node, detail, requestSeq){
+      const handle = node.id;
+      const opSeq = beginTreeNodeOp(handle);
+      const d = await treeFetchJson(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(handle));
+      if(!isTreeRequestCurrent(requestSeq, currentTreeDocId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return null;
+      const items = (d.context || []);
+      return items.map(c => mdToHtml(c.text || '')).join('<hr>') || '（无正文）';
+    }
+    async function loadTreeNodeDetail(node, detail, requestSeq){
+      const handle = node.id;
+      const docId = currentTreeDocId;
+      const physical = node.physical === true;
+      const opSeq = beginTreeNodeOp(handle);
+      const u = ensureTreeNodeUi(handle);
+      u.detail = detail;
+      u.physical = physical;
+      u.parentMergedHandle = node.parentMergedHandle || null;
+      detail.dataset.handle = handle;
+      detail.innerHTML = '<p class="tree-leaf-loading">加载中…</p>';
+      try{
+        const editPromise = treeFetchJson(doceditNodeUrl(handle, '', physical)).catch(e => ({_editError:e.message}));
+        let items = [];
+        if(!physical){
+          const d = await treeFetchJson(API_BASE + '/chat/node?text_only=1&handle=' + encodeURIComponent(handle));
+          if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+          items = (d.context || []);
+          u.readHtml = items.map(c => mdToHtml(c.text || '')).join('<hr>') || '（无正文）';
+        }
+        const e = await editPromise;
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        if(!e._editError){
+          u.text = e.text || '';
+          u.textHash = e.text_hash || '';
+          u.baseVersion = e.doc_version || currentTreeVersion || 1;
+          u.editable = e.editable === true;
+          u.editableReason = e.editable_reason || null;
+          u.canEdit = e.can_edit === true;
+          u.changed = e.changed === true;
+          u.summaryStatus = e.summary_status || 'clean';
+          u.mergedMembers = !physical && u.editableReason === 'merged_section' && items.length > 1 ? items : [];
+          if(physical) u.readHtml = mdToHtml(u.text || '') || '（无正文）';
+          if(u.changed) treeTouchedNodes.add(handle);
+        }else{
+          u.editable = false;
+          u.editableReason = 'unknown_node';
+          u.canEdit = false;
+          u.mergedMembers = [];
+        }
+        u.mode = 'view';
+        u.pending = null;
+        u.error = '';
+        renderTreeNodeDetail(node, detail);
+      }catch(e){
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        detail.innerHTML = '<p class="tree-leaf-err">加载失败：' + escapeHtml(e.message || '未知错误') + '</p>';
+      }
+    }
+    function renderTreeNodeDetail(node, detail){
+      const handle = node.id;
+      const u = ensureTreeNodeUi(handle);
+      u.detail = detail;
+      const canOperate = u.editable && u.canEdit && currentTreeCanEdit && !currentTreeActiveReparse;
+      const reason = currentTreeActiveReparse ? 'active_reparse' : u.editableReason;
+      const status = u.changed ? '<span class="tree-touched">改过</span>' : '';
+      const hint = canOperate ? (u.summaryStatus === 'stale' ? '已保存，摘要待刷新' : (u.physical ? '正在编辑具体窗口正文，不会修改其他窗口或子章节' : '只编辑当前节点正文，不会修改子章节')) : (reason ? editableReasonText(reason) : '');
+      let html = '<div class="tree-edit-toolbar">'
+        + status
+        + (u.parentMergedHandle ? '<button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-back-merged>返回合并节点</button>' : '')
+        + (hint ? '<span class="tree-edit-hint">' + escapeHtml(hint) + '</span>' : '')
+        + '<span class="tree-edit-hint">版本 ' + escapeHtml(u.baseVersion || currentTreeVersion || '-') + '</span>'
+        + '<span class="ml-auto"></span>';
+      if(canOperate && u.mode === 'view'){
+        html += '<button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-edit>编辑</button>'
+          + '<button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-ai>AI编辑</button>';
+      }
+      html += '</div>';
+      if(u.error) html += '<p class="tree-leaf-err mb-2">' + escapeHtml(u.error) + '</p>';
+      if(u.mode === 'edit'){
+        html += '<textarea class="tree-edit-textarea" data-tree-textarea>' + escapeHtml(u.text || '') + '</textarea>'
+          + '<div class="tree-edit-toolbar mt-2">'
+          + '<button class="btn-primary !py-1.5 !px-3 text-xs" data-tree-save>保存</button>'
+          + '<button class="btn-ghost !py-1.5 !px-3 text-xs" data-tree-cancel>取消</button>'
+          + '</div>';
+      }else{
+        html += '<div class="tree-leaf-md md">' + (u.readHtml || '（无正文）') + '</div>';
+      }
+      if(u.mergedMembers && u.mergedMembers.length > 1){
+        html += '<div class="tree-member-list">'
+          + '<p class="tree-edit-hint m-0">该条目由 ' + escapeHtml(u.mergedMembers.length) + ' 个连续同名窗口合并展示，请选择具体窗口编辑。</p>'
+          + u.mergedMembers.map((m, idx) => {
+            const meta = [m.lines ? ('行' + m.lines) : '', m.page ? ('第' + m.page + '页') : ''].filter(Boolean).join(' · ');
+            return '<div class="tree-member-item">'
+              + '<div><p class="tree-member-title">第 ' + escapeHtml(idx + 1) + ' 段' + (meta ? ' · ' + escapeHtml(meta) : '') + '</p>'
+              + '<p class="tree-member-snippet">' + escapeHtml(treePlainSnippet(m.text || '', 88)) + '</p></div>'
+              + '<button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-member-edit="' + escapeHtml(m.handle || '') + '">编辑这一段</button>'
+              + '</div>';
+          }).join('')
+          + '</div>';
+      }
+      if(u.mode === 'ai'){
+        html += '<div class="tree-ai-box">'
+          + '<textarea class="tree-ai-input" data-tree-ai-input placeholder="说明要怎么改当前节点正文">' + escapeHtml(u.aiInstruction || '') + '</textarea>'
+          + '<div class="tree-edit-toolbar mt-2">'
+          + '<button class="btn-primary !py-1.5 !px-3 text-xs" data-tree-ai-run>生成改写预览</button>'
+          + '<button class="btn-ghost !py-1.5 !px-3 text-xs" data-tree-ai-cancel>取消</button>'
+          + '</div>';
+        if(u.pending){
+          html += '<div class="tree-diff">' + sanitizeDoceditDiff(u.pending.diff_html || '') + '</div>'
+            + (u.pending.explanation ? '<p class="tree-edit-hint mt-2">' + escapeHtml(u.pending.explanation) + '</p>' : '')
+            + '<div class="tree-edit-toolbar mt-2">'
+            + '<button class="btn-primary !py-1.5 !px-3 text-xs" data-tree-ai-accept>接受并保存</button>'
+            + '<button class="btn-ghost !py-1.5 !px-3 text-xs" data-tree-ai-discard>丢弃</button>'
+            + '</div>';
+        }
+        html += '</div>';
+      }
+      detail.innerHTML = html;
+      renderMathIn(detail);
+      detail.querySelector('[data-tree-back-merged]')?.addEventListener('click', () => {
+        loadTreeNodeDetail({id: u.parentMergedHandle}, detail, treeOpenSeq);
+      });
+      detail.querySelectorAll('[data-tree-member-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const memberHandle = btn.getAttribute('data-tree-member-edit');
+          if(memberHandle) loadTreeNodeDetail({id: memberHandle, physical:true, parentMergedHandle:handle}, detail, treeOpenSeq);
+        });
+      });
+      detail.querySelector('[data-tree-edit]')?.addEventListener('click', () => setTreeNodeMode(handle, 'edit'));
+      detail.querySelector('[data-tree-ai]')?.addEventListener('click', () => startTreeNodeAi(handle));
+      detail.querySelector('[data-tree-save]')?.addEventListener('click', () => saveTreeNodeManual(handle));
+      detail.querySelector('[data-tree-cancel]')?.addEventListener('click', () => setTreeNodeMode(handle, 'view'));
+      detail.querySelector('[data-tree-ai-run]')?.addEventListener('click', () => requestTreeNodeAiDiff(handle));
+      detail.querySelector('[data-tree-ai-cancel]')?.addEventListener('click', () => setTreeNodeMode(handle, 'view'));
+      detail.querySelector('[data-tree-ai-accept]')?.addEventListener('click', () => acceptTreeNodeAiDiff(handle));
+      detail.querySelector('[data-tree-ai-discard]')?.addEventListener('click', () => discardTreeNodeAiDiff(handle));
+    }
+    async function saveTreeNodeManual(handle){
+      const u = ensureTreeNodeUi(handle);
+      const detail = u.detail;
+      const textarea = detail?.querySelector('[data-tree-textarea]');
+      if(!textarea) return;
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      const opSeq = beginTreeNodeOp(handle);
+      u.error = '';
+      const afterText = textarea.value;
+      try{
+        const resp = await treeFetchJson(doceditNodeUrl(handle, '', u.physical), {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({base_version:u.baseVersion, base_hash:u.textHash, after_text:afterText, op_type:'manual_edit', ai_instruction:null, ai_explanation:null})
+        });
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        refreshTreeAfterNodeSaved(handle, resp);
+      }catch(e){
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        u.error = e.message || '保存失败';
+        renderTreeNodeDetailByHandle(handle);
+      }
+    }
+    function startTreeNodeAi(handle){
+      const u = ensureTreeNodeUi(handle);
+      u.mode = 'ai';
+      u.pending = null;
+      u.error = '';
+      renderTreeNodeDetailByHandle(handle);
+    }
+    async function requestTreeNodeAiDiff(handle){
+      const u = ensureTreeNodeUi(handle);
+      const detail = u.detail;
+      const input = detail?.querySelector('[data-tree-ai-input]');
+      const instruction = (input?.value || '').trim();
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      if(!instruction){
+        u.error = '请先填写改写要求';
+        renderTreeNodeDetailByHandle(handle);
+        return;
+      }
+      const opSeq = beginTreeNodeOp(handle);
+      u.aiInstruction = instruction;
+      u.error = '';
+      renderTreeNodeDetailByHandle(handle);
+      try{
+        const resp = await treeFetchJson(doceditNodeUrl(handle, '/ai-diff', u.physical), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({base_version:u.baseVersion, base_hash:u.textHash, instruction})
+        });
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        u.pending = resp;
+        u.mode = 'ai';
+        renderTreeNodeDetailByHandle(handle);
+      }catch(e){
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        u.error = e.message || 'AI改写失败';
+        renderTreeNodeDetailByHandle(handle);
+      }
+    }
+    async function acceptTreeNodeAiDiff(handle){
+      const u = ensureTreeNodeUi(handle);
+      if(!u.pending) return;
+      const detail = u.detail;
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      const opSeq = beginTreeNodeOp(handle);
+      try{
+        const resp = await treeFetchJson(doceditNodeUrl(handle, '', u.physical), {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({base_version:u.baseVersion, base_hash:u.textHash, after_text:u.pending.after_text, op_type:'ai_edit', ai_instruction:u.aiInstruction, ai_explanation:u.pending.explanation || null})
+        });
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        refreshTreeAfterNodeSaved(handle, resp);
+      }catch(e){
+        if(!isTreeRequestCurrent(requestSeq, docId, handle, detail) || !isTreeNodeOpCurrent(handle, opSeq)) return;
+        u.error = e.message || '保存AI改写失败';
+        renderTreeNodeDetailByHandle(handle);
+      }
+    }
+    function discardTreeNodeAiDiff(handle){
+      const u = ensureTreeNodeUi(handle);
+      u.pending = null;
+      u.error = '';
+      renderTreeNodeDetailByHandle(handle);
+    }
+    function refreshTreeAfterNodeSaved(handle, resp){
+      const u = ensureTreeNodeUi(handle);
+      currentTreeVersion = resp.version || currentTreeVersion;
+      u.text = resp.text || '';
+      u.textHash = resp.text_hash || '';
+      u.baseVersion = currentTreeVersion || u.baseVersion;
+      u.changed = resp.changed === true;
+      u.summaryStatus = resp.summary_status || 'stale';
+      u.mode = 'view';
+      u.pending = null;
+      u.error = '';
+      if(u.changed) treeTouchedNodes.add(handle);
+      else treeTouchedNodes.delete(handle);
+      updateTreeVersionBadge();
+      updateTreeSubline();
+      renderTreeStructure();
+    }
+    async function renderTreeHistory(){
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      if(!docId) return;
+      treeViewMode = 'history';
+      const historyBtn = document.getElementById('tree-history');
+      if(historyBtn) historyBtn.textContent = '返回结构';
+      const box = document.getElementById('tree-view');
+      box.innerHTML = '<p class="text-slate-400">加载修改历史…</p>';
+      try{
+        const d = await treeFetchJson(API_BASE + '/docedit/documents/' + encodeURIComponent(docId) + '/history');
+        if(!treeRequestStillCurrent(requestSeq, docId) || treeViewMode !== 'history') return;
+        currentTreeVersion = d.version || currentTreeVersion;
+        updateTreeVersionBadge();
+        const items = d.items || [];
+        if(!items.length){
+          box.innerHTML = '<p class="text-slate-400 py-8 text-center">暂无修改历史</p>';
+          return;
+        }
+        box.innerHTML = '<div class="tree-history-list">' + items.map(it => {
+          const cid = 'tree-change-' + it.change_id;
+          const rollback = it.can_rollback ? `<button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-rollback="${it.change_id}" data-node-handle="${escapeHtml(it.node_handle || '')}">回滚到修改前</button>` : '';
+          return `<div class="tree-history-card">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="font-semibold text-slate-700 text-sm truncate">v${escapeHtml(it.version)} · ${escapeHtml(it.node_title || it.node_handle || '')}</div>
+                <div class="tree-history-meta"><span>${escapeHtml(it.op_type || '')}</span><span>${escapeHtml(it.actor_username || '')}</span><span>${escapeHtml(it.created_at || '')}</span></div>
+                <div class="text-[11px] text-slate-400 mt-1 truncate">${escapeHtml(it.node_path || '')}</div>
+              </div>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <button class="btn-ghost !py-1 !px-2.5 text-[11px]" data-tree-diff="${it.change_id}" data-target="${cid}">查看diff</button>
+                ${rollback}
+              </div>
+            </div>
+            <div id="${cid}" class="hidden"></div>
+          </div>`;
+        }).join('') + '</div>';
+        box.querySelectorAll('[data-tree-diff]').forEach(btn => btn.addEventListener('click', () => loadTreeChangeDiff(btn.dataset.treeDiff, btn.dataset.target)));
+        box.querySelectorAll('[data-tree-rollback]').forEach(btn => btn.addEventListener('click', () => rollbackTreeChange(btn.dataset.treeRollback, btn.dataset.nodeHandle)));
+      }catch(e){
+        if(!treeRequestStillCurrent(requestSeq, docId)) return;
+        box.innerHTML = '<p class="text-red-500">加载失败：' + escapeHtml(e.message || '未知错误') + '</p>';
+      }
+    }
+    function toggleTreeHistory(){
+      if(treeViewMode === 'history') renderTreeStructure();
+      else renderTreeHistory();
+    }
+    async function loadTreeChangeDiff(changeId, containerId){
+      const box = document.getElementById(containerId);
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      if(!box) return;
+      if(!box.classList.contains('hidden')){
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+      box.classList.remove('hidden');
+      box.innerHTML = '<p class="tree-leaf-loading mt-3">加载diff…</p>';
+      try{
+        const d = await treeFetchJson(API_BASE + '/docedit/changes/' + encodeURIComponent(changeId));
+        if(!treeRequestStillCurrent(requestSeq, docId) || treeViewMode !== 'history') return;
+        box.innerHTML = '<div class="tree-diff">' + sanitizeDoceditDiff(d.diff_html || '') + '</div>';
+      }catch(e){
+        if(!treeRequestStillCurrent(requestSeq, docId)) return;
+        box.innerHTML = '<p class="tree-leaf-err mt-3">加载失败：' + escapeHtml(e.message || '未知错误') + '</p>';
+      }
+    }
+    async function rollbackTreeChange(changeId, nodeHandle){
+      if(!confirm('确认回滚这个修改？回滚会新增一个版本，不会删除历史记录。')) return;
+      const docId = currentTreeDocId;
+      const requestSeq = treeOpenSeq;
+      const opSeq = beginTreeNodeOp(nodeHandle);
+      try{
+        const node = await treeFetchJson(API_BASE + '/docedit/nodes/' + encodeURIComponent(nodeHandle));
+        if(!treeRequestStillCurrent(requestSeq, docId) || !isTreeNodeOpCurrent(nodeHandle, opSeq)) return;
+        const resp = await treeFetchJson(API_BASE + '/docedit/changes/' + encodeURIComponent(changeId) + '/rollback', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({base_version:node.doc_version || currentTreeVersion, base_hash:node.text_hash})
+        });
+        if(!treeRequestStillCurrent(requestSeq, docId) || !isTreeNodeOpCurrent(nodeHandle, opSeq)) return;
+        refreshTreeAfterNodeSaved(nodeHandle, resp);
+        await renderTreeHistory();
+      }catch(e){
+        if(!treeRequestStillCurrent(requestSeq, docId) || !isTreeNodeOpCurrent(nodeHandle, opSeq)) return;
+        alert('回滚失败：' + (e.message || '未知错误'));
+      }
     }
     async function openDocTree(docId){
       if(!treeModal) return;
@@ -2057,6 +2545,15 @@
       currentTreeDocId = docId;
       currentTreeDocName = '';
       currentTreeHasPdf = null;
+      currentTreeVersion = null;
+      currentTreeCanEdit = false;
+      currentTreeActiveReparse = false;
+      currentTreeRoots = [];
+      currentTreeKb = '';
+      treeViewMode = 'structure';
+      treeNodeUi.clear();
+      treeTouchedNodes.clear();
+      updateTreeVersionBadge();
       setTreeReparseState(null);
       treeModal.classList.remove('hidden');
       const box = document.getElementById('tree-view');
@@ -2076,14 +2573,14 @@
         if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
         currentTreeDocName = d.doc_name || docId;
         currentTreeHasPdf = hasPdf;
+        currentTreeRoots = roots;
+        currentTreeKb = d.kb || 'default';
+        await loadTreeEditState(docId, requestSeq);
+        if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
         setTreeReparseState(currentTreeHasPdf);
         document.getElementById('tree-modal-title').textContent = d.doc_name || '文档结构';
-        const pdfText = hasPdf === true ? '' : (hasPdf === false ? ' · 无原 PDF' : ' · 原 PDF 状态未知（接口版本未更新/请重启后端）');
-        const submittedText = treeReparseSubmittedDocs.has(docId) ? ' · 重新解析已提交' : '';
-        document.getElementById('tree-modal-sub').textContent = (d.kb || 'default') + ' · ' + roots.length + ' 章 · ' + countTreeNodes(roots) + ' 节点' + pdfText + submittedText;
-        box.innerHTML = '';
-        if(!roots.length){ box.innerHTML = '<p class="text-slate-400 py-8 text-center">该文档无结构节点</p>'; return; }
-        roots.forEach((n, i) => box.appendChild(makeTreeNode(n, 0, i + 1)));
+        updateTreeSubline();
+        renderTreeStructure();
       }catch(err){
         if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId) return;
         box.innerHTML = '<p class="text-red-500">加载失败：' + escapeHtml(err.message) + '</p>';
@@ -2118,6 +2615,8 @@
         treeReparseSubmittedDocs.add(docId);
         if(requestSeq !== treeOpenSeq || currentTreeDocId !== docId || !isTreeModalOpen()) return;
         document.getElementById('tree-modal-sub').textContent = '已提交重新解析任务 ' + (d.task_id || '') + ' · 后台处理中';
+        currentTreeActiveReparse = true;
+        updateTreeVersionBadge();
         setTreeReparseState(true);
         if(confirm('已加入任务队列，是否现在查看进度？')) switchPage('kb-queue');
       }catch(err){
@@ -2130,11 +2629,12 @@
     }
     if(treeModal){
       treeModal.querySelectorAll('[data-tree-close]').forEach(el => el.addEventListener('click', closeTreeModal));
+      document.getElementById('tree-history')?.addEventListener('click', toggleTreeHistory);
       document.getElementById('tree-reparse')?.addEventListener('click', reparseCurrentTreeDoc);
       document.getElementById('tree-expand-all').addEventListener('click',
-        () => document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.remove('tree-collapsed')));
+        () => { if(treeViewMode === 'structure') document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.remove('tree-collapsed')); });
       document.getElementById('tree-collapse-all').addEventListener('click',
-        () => document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.add('tree-collapsed')));
+        () => { if(treeViewMode === 'structure') document.querySelectorAll('#tree-view .tree-node').forEach(n => n.classList.add('tree-collapsed')); });
     }
 
     // ── 对话检索范围下拉（接 /ingest/stats 的 kbs）──
