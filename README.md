@@ -1,5 +1,9 @@
 # Torch Knowledge Base
 
+<p align="center">
+  <strong>English</strong> | <a href="README.zh-CN.md">中文</a>
+</p>
+
 An enterprise-oriented knowledge assistant for R&D process and inspection documents. It turns PDF and Office files into a structured, searchable knowledge base, then uses a bounded agent runtime to answer questions with document-level and section-level citations.
 
 The project focuses on the engineering around an AI application: multimodal ingestion, hierarchical indexing, hybrid retrieval, tool execution, streaming, citation grounding, evaluation, and graceful degradation.
@@ -62,14 +66,7 @@ Hybrid retrieval improved MRR@10 by 9.4 percentage points and nDCG@10 by 9.0 poi
 
 The agent evaluation executed 50 questions three times each (150 runs): 100% completed without exceptions, 90% met the run-success condition, and 415/415 cited handles were grounded in retrieved sources. Citation precision was 52.5% and citation recall was 92.7%, so citation selectivity remains an explicit improvement area rather than a hidden limitation.
 
-Full manifests, metric definitions, dataset hashes, corpus/index fingerprints, and redacted results are available in:
-
-- [`backend/evals/README.md`](backend/evals/README.md)
-- [`retrieval run 1`](backend/evals/reports/retrieval-test-groups-c31e0eeb-run1/report.md)
-- [`retrieval run 2`](backend/evals/reports/retrieval-test-groups-c31e0eeb-run2/report.md)
-- [`agent evaluation`](backend/evals/reports/agent-test-88ab8fae-20260823/report.md)
-
-The recorded evaluation manifests identify a dirty working tree at the evaluated Git SHA. Treat the numbers as reproducible project evidence, not a release benchmark, until a clean-commit rerun is published.
+The local evaluation workspace contains full manifests, metric definitions, dataset hashes, corpus/index fingerprints, and redacted results. Those artifacts are not yet part of the public commit. The recorded manifests also identify a dirty working tree at the evaluated Git SHA, so treat the numbers as reproducible project evidence—not a release benchmark—until a clean-commit rerun and sanitized reports are published together.
 
 ## Tech stack
 
@@ -190,7 +187,5 @@ This is a v0, single-node engineering project rather than a finished multi-tenan
 ## Design references
 
 - [`ADR-003: PageIndex + hybrid retrieval`](decisions/ADR-003-retrieval.md)
-- [`ADR-004: native agent runtime`](decisions/ADR-004-native-agent-runtime.md)
 - [`Current implemented features`](docs/current-implemented-features.md)
 - [`Hybrid retrieval design`](docs/plans/2026-06-24-hybrid-retrieval-design.md)
-
