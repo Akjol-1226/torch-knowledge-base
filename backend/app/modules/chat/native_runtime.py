@@ -266,6 +266,8 @@ class NativeReactRuntime:
                     model_route=getattr(self._model, "model_name", None),
                     temperature=getattr(self._model, "temperature", None),
                     configured_max_retries=getattr(self._model, "max_retries", None),
+                    configured_max_output_tokens=getattr(self._model, "max_tokens", None),
+                    configured_timeout_seconds=getattr(self._model, "request_timeout", None),
                     physical_attempts=None,
                     prompt_snapshot=snapshot(observation, self._system_prompt),
                     tool_schema_snapshot=snapshot(observation, [

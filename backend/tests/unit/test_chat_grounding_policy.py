@@ -14,6 +14,12 @@ from evals.agent_trace import audit_trace
 
 
 class Model:
+    model_name = "fictional"
+    temperature = 0
+    max_retries = 0
+    max_tokens = 800
+    request_timeout = 12
+
     def __init__(self):
         self.calls = 0
         self.inputs = []
@@ -56,6 +62,10 @@ async def test_only_repair_policy_changes_server_read_vs_model_rewrite(policy, c
     bundle = recorder.bundle()
     assert audit_trace(bundle)["execution_status"] == "completed"
     assert bundle["events"][0]["data"]["grounding_repair_policy"] == policy
+    configuration = next(event["data"] for event in bundle["events"]
+                         if event["kind"] == "runtime_config")
+    assert configuration["configured_max_output_tokens"] == 800
+    assert configuration["configured_timeout_seconds"] == 12
     assert any(event["kind"] == stage for event in bundle["events"])
     if policy == "rewrite_only":
         assert "Frozen fictional source." in model.inputs[-1][-1].content
