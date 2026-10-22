@@ -1,5 +1,6 @@
 import json
 import re
+from typing import Any
 
 from app.core.logging import get_logger
 
@@ -45,23 +46,6 @@ def _new_state(seed_cites=None):
     return state
 
 
-def _is_read_node_result(tool_name: str, raw) -> bool:
-    """该工具结果是否是 read_node 读到的正文——只有它的 cite 才可作为最终引用来源。
-
-    优先按工具名判定；ToolMessage 缺 name 时按结果形状兜底：read_node 返回【单个含 cite 的
-    dict】，search_nodes 返回 list、错误返回不含 cite 的 dict——都不算。
-    """
-    if tool_name:
-        return tool_name == "read_node"
-    data = raw
-    if isinstance(raw, str):
-        try:
-            data = json.loads(raw)
-        except Exception:
-            return False
-    return isinstance(data, dict) and isinstance(data.get("cite"), dict)
-
-
 def _add_cite(state, cite: dict) -> bool:
     """把一个 cite dict 按文档分组、node 按 handle 去重累积进 state['sources']。
     cite 缺 handle/doc_id 时（旧数据/手构）用 doc+section+lines 兜底去重、用 doc 名分组。"""
@@ -86,49 +70,50 @@ def _add_cite(state, cite: dict) -> bool:
     return True
 
 
-def _map_event(mode, data, state):
-    """把一个 (mode,data) 事件映射成 0..N 个前端事件，并累积最终答案/引用到 state。"""
+def _map_event(event, state):
+    """把 RuntimeEvent 映射成前端事件，并累积最终答案和引用。"""
     events = []
-    if mode == "messages":
-        chunk, meta = data
-        text = getattr(chunk, "content", "") or ""
-        node = (meta or {}).get("langgraph_node")
-        # 只把 agent 节点产出的、有内容的 token 当答案流
-        if text and node in (None, "agent"):
+    event_type = event.get("type")
+    if event_type == "assistant_chunk":
+        text = event.get("text") or ""
+        if text:
             state["final"].append(text)
             events.append({"type": "chunk", "text": text})
-    elif mode == "updates":
-        for _node, upd in (data or {}).items():
-            for m in (upd or {}).get("messages", []) if isinstance(upd, dict) else []:
-                for tc in (getattr(m, "tool_calls", None) or []):
-                    events.append(
-                        {"type": "tool", "name": tc.get("name", ""), "args": tc.get("args", {})}
-                    )
-                if m.__class__.__name__ == "ToolMessage":
-                    raw = getattr(m, "content", "")
-                    tool_name = getattr(m, "name", "") or ""
-                    # 原始工具返回（开发调试展开看）；截断防 SSE 过大
-                    content_str = (
-                        raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
-                    )
-                    events.append(
-                        {
-                            "type": "tool_result",
-                            "name": tool_name,
-                            "content": content_str[:2000],
-                        }
-                    )
-                    # 只有 read_node 读到的正文才计入"数据来源"：确保最终引用必须基于实际读过的
-                    # 全文，而非 search_nodes 的片段。搜到但没 read 的节点不进 sources，其 [[cite]]
-                    # 上标在前端因 handle 不在 sources 被丢弃（见 _answer_event 的未读引用校验）。
-                    if _is_read_node_result(tool_name, raw):
-                        added = False
-                        for c in extract_cite(raw):
-                            added = _add_cite(state, c) or added
-                            h = c.get("handle")
-                            if h and h not in state["read_ids"]:  # 去重，避免同轮重复读
-                                state["read_ids"].add(h)
-                                state["read_cites"].append(c)
+    elif event_type == "tool_call":
+        events.append(
+            {
+                "type": "tool",
+                "name": event.get("name") or "",
+                "args": event.get("args") or {},
+            }
+        )
+    elif event_type == "assistant_complete":
+        if event.get("has_tool_calls"):
+            # 调用工具轮产生的文字只是过程前言，不得进入终态答案和会话持久化。
+            state["final"].clear()
+    elif event_type == "tool_result":
+        raw = event.get("content", "")
+        tool_name = event.get("name") or ""
+        content_str = (
+            raw
+            if isinstance(raw, str)
+            else json.dumps(raw, ensure_ascii=False, default=str)
+        )
+        events.append(
+            {
+                "type": "tool_result",
+                "name": tool_name,
+                "content": content_str[:2000],
+            }
+        )
+        # 只有成功 read_node 读到的正文才计入数据来源。
+        if tool_name == "read_node" and not event.get("is_error", False):
+            for cite in extract_cite(raw):
+                _add_cite(state, cite)
+                handle = cite.get("handle")
+                if handle and handle not in state["read_ids"]:
+                    state["read_ids"].add(handle)
+                    state["read_cites"].append(cite)
     return events
 
 
@@ -152,22 +137,27 @@ def _answer_event(state):
             "ungrounded": ungrounded, "read_cites": state["read_cites"]}
 
 
-def _read_grounding_cites(ungrounded_ids: list) -> tuple[list, list]:
+def _read_grounding_cites(
+    ungrounded_ids: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
     from app.modules.chat.tools import get_store
 
     store = get_store()
-    seed_cites: list = []
-    missing: list = []
+    seed_cites: list[dict[str, Any]] = []
+    missing: list[str] = []
     for hid in ungrounded_ids:
         try:
             node = store.read_node(hid)
         except Exception:
             node = None
-        ok = isinstance(node, dict) and not node.get("error")
-        if not ok or not isinstance(node.get("cite"), dict):
+        if not isinstance(node, dict) or node.get("error"):
             missing.append(hid)
             continue
-        cite = dict(node["cite"])
+        raw_cite = node.get("cite")
+        if not isinstance(raw_cite, dict):
+            missing.append(hid)
+            continue
+        cite: dict[str, Any] = dict(raw_cite)
         cite["handle"] = cite.get("handle") or hid
         cite["doc_id"] = cite.get("doc_id") or hid.split(":")[0]
         text = node.get("text", "")
@@ -205,6 +195,7 @@ def autofix_grounding(final_ev: dict, ungrounded_ids: list, max_autofix: int = 3
     fixed["ungrounded"] = []
     fixed["grounding_autofixed"] = True
     fixed["grounding_missing"] = missing
+    fixed["grounding_read_count"] = len(ungrounded_ids)
     return fixed
 
 
@@ -250,20 +241,12 @@ def build_grounding_correction(ungrounded_ids: list) -> tuple:
     return clean_seed_cites, "\n".join(parts)
 
 
-def events_from_stream(stream, seed_cites=None):
-    """把同步 agent.stream(stream_mode=['updates','messages']) 映射成前端事件 tool/chunk/answer。"""
-    state = _new_state(seed_cites)
-    for mode, data in stream:
-        yield from _map_event(mode, data, state)
-    yield _answer_event(state)
-
-
-async def events_from_astream(astream, seed_cites=None):
-    """异步版：消费 agent.astream(...)，避免在 LLM 流式期间阻塞事件循环。
+async def events_from_runtime(stream, seed_cites=None):
+    """消费 Native Runtime 事件并映射为稳定的前端 SSE 事件。
 
     seed_cites：接地纠正轮把"服务端已补读"的节点预置进 state，使其计入 read_ids/数据来源。"""
     state = _new_state(seed_cites)
-    async for mode, data in astream:
-        for ev in _map_event(mode, data, state):
+    async for event in stream:
+        for ev in _map_event(event, state):
             yield ev
     yield _answer_event(state)
