@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 from langchain_core.tools import tool
@@ -7,10 +9,26 @@ from app.core.retrieval.store_provider import get_tree_store, set_tree_store_for
 
 # 当前请求的检索范围；chat router 负责 set/reset。
 current_kbs: ContextVar[list | None] = ContextVar("current_kbs", default=None)
+_request_store: ContextVar[TreeStore | None] = ContextVar("chat_request_store", default=None)
 
 
 def get_store() -> TreeStore:
-    return get_tree_store()
+    override = _request_store.get()
+    return override if override is not None else get_tree_store()
+
+
+@contextmanager
+def use_read_view(store: TreeStore) -> Iterator[None]:
+    """Use one explicit reader for all tools and grounding repair in this context.
+
+    This isolates tasks without changing the process-global production store.
+    It does not certify that the caller prepared a consistent frozen corpus.
+    """
+    token = _request_store.set(store)
+    try:
+        yield
+    finally:
+        _request_store.reset(token)
 
 
 def set_store(ts: TreeStore) -> None:

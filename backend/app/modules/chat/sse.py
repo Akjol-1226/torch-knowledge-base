@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from app.core.logging import get_logger
+from app.modules.chat.observation import TurnObservation, grounding_read, observe
 
 log = get_logger("chat.sse")
 
@@ -139,6 +140,8 @@ def _answer_event(state):
 
 def _read_grounding_cites(
     ungrounded_ids: list[str],
+    *, observation: TurnObservation | None = None, stage: str = "server_autofix_read",
+    repair_pass: int = 0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     from app.modules.chat.tools import get_store
 
@@ -152,15 +155,20 @@ def _read_grounding_cites(
             node = None
         if not isinstance(node, dict) or node.get("error"):
             missing.append(hid)
+            observe(observation, "grounding_read_failed", handle=hid, stage=stage,
+                    repair_pass=repair_pass)
             continue
         raw_cite = node.get("cite")
         if not isinstance(raw_cite, dict):
             missing.append(hid)
+            observe(observation, "grounding_read_failed", handle=hid, stage=stage,
+                    repair_pass=repair_pass)
             continue
         cite: dict[str, Any] = dict(raw_cite)
         cite["handle"] = cite.get("handle") or hid
         cite["doc_id"] = cite.get("doc_id") or hid.split(":")[0]
         text = node.get("text", "")
+        grounding_read(observation, stage, hid, text, repair_pass=repair_pass)
         cite["snippet"] = text[:200]
         cite["_grounding_title"] = node.get("title", "")
         cite["_grounding_text"] = text
@@ -174,7 +182,10 @@ def _strip_cite_markers(text: str, handles: list) -> str:
     return text
 
 
-def autofix_grounding(final_ev: dict, ungrounded_ids: list, max_autofix: int = 3) -> dict | None:
+def autofix_grounding(
+    final_ev: dict, ungrounded_ids: list, max_autofix: int = 3,
+    *, observation: TurnObservation | None = None,
+) -> dict | None:
     """Lightweight grounding repair for a few ungrounded cite ids.
 
     Readable ids are treated as server-verified sources. Missing ids have their cite marker
@@ -182,7 +193,9 @@ def autofix_grounding(final_ev: dict, ungrounded_ids: list, max_autofix: int = 3
     """
     if not ungrounded_ids or len(ungrounded_ids) > max_autofix:
         return None
-    seed_cites, missing = _read_grounding_cites(ungrounded_ids)
+    seed_cites, missing = _read_grounding_cites(
+        ungrounded_ids, observation=observation, stage="server_autofix_read"
+    ) if observation is not None else _read_grounding_cites(ungrounded_ids)
     visible_seed_cites = [
         {k: v for k, v in cite.items() if not k.startswith("_grounding_")}
         for cite in seed_cites
@@ -199,7 +212,9 @@ def autofix_grounding(final_ev: dict, ungrounded_ids: list, max_autofix: int = 3
     return fixed
 
 
-def build_grounding_correction(ungrounded_ids: list) -> tuple:
+def build_grounding_correction(
+    ungrounded_ids: list, *, observation: TurnObservation | None = None,
+) -> tuple:
     """为接地纠正轮服务端补读"被引用但本轮未 read_node 读过"的节点。
 
     返回 (seed_cites, corrective_text)：
@@ -208,13 +223,17 @@ def build_grounding_correction(ungrounded_ids: list) -> tuple:
     - corrective_text 作为一条 user 消息回灌，附上能读到的正文，要求模型据此重写、删无据内容。
     读不到的 id（多半模型凭空标的）只在指令里要求删除相关内容。
     """
-    seed_cites, missing = _read_grounding_cites(ungrounded_ids)
+    seed_cites, missing = _read_grounding_cites(
+        ungrounded_ids, observation=observation, stage="correction_read", repair_pass=1
+    ) if observation is not None else _read_grounding_cites(ungrounded_ids)
     blocks: list = []
     clean_seed_cites: list = []
     for cite in seed_cites:
         title = cite.pop("_grounding_title", "")
         text = cite.pop("_grounding_text", "")
         clean_seed_cites.append(cite)
+        grounding_read(observation, "correction_input_evidence", cite.get("handle", ""),
+                       text[:1800], repair_pass=1)
         blocks.append(f"【{cite.get('handle')}｜{title}】\n{text[:1800]}")
 
     parts = [
