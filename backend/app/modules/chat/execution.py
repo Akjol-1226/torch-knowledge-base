@@ -6,6 +6,7 @@ import asyncio
 import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
+from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
 from starlette.concurrency import run_in_threadpool
@@ -15,6 +16,7 @@ from app.modules.chat.observation import TurnObservation, finish, observe, snaps
 from app.modules.chat.sse import autofix_grounding, build_grounding_correction, events_from_runtime
 
 log = get_logger("chat.execution")
+GroundingRepairPolicy = Literal["autofix_then_rewrite", "rewrite_only"]
 
 
 async def execute_turn(
@@ -24,16 +26,21 @@ async def execute_turn(
     *,
     turn: str = "",
     observation: TurnObservation | None = None,
+    grounding_repair_policy: GroundingRepairPolicy = "autofix_then_rewrite",
 ) -> AsyncIterator[dict]:
     """Shared streaming path, with optional private boundary observations.
 
     The terminal is runtime execution only; HTTP persistence is outside it.
     Closing this generator also closes the model/runtime generators.
     """
-    observe(observation, "turn_started")
+    if grounding_repair_policy not in {"autofix_then_rewrite", "rewrite_only"}:
+        raise ValueError("unsupported grounding repair policy")
+    observe(observation, "turn_started", grounding_repair_policy=grounding_repair_policy)
     terminal = False
     try:
-        async with aclosing(_execute_turn(runtime, messages, config, turn, observation)) as stream:
+        async with aclosing(_execute_turn(
+            runtime, messages, config, turn, observation, grounding_repair_policy
+        )) as stream:
             async for event in stream:
                 if event.get("type") == "answer":
                     observe(observation, "turn_final_answer",
@@ -58,7 +65,9 @@ async def execute_turn(
             finish(observation, "cancelled")
 
 
-async def _execute_turn(runtime, messages, config, turn, observation) -> AsyncGenerator[dict, None]:
+async def _execute_turn(
+    runtime, messages, config, turn, observation, grounding_repair_policy,
+) -> AsyncGenerator[dict, None]:
     """执行正常轮和最多一次引用纠正轮，最终只下发一个 answer 事件。"""
     seed_cites = None
     final_event = None
@@ -83,12 +92,16 @@ async def _execute_turn(runtime, messages, config, turn, observation) -> AsyncGe
         if attempt == 0 and ungrounded:
             if pending is None:
                 break
-            observe(observation, "grounding_repair_started", repair_pass=0)
             kwargs = {"observation": observation} if observation is not None else {}
-            try:
-                fixed = await run_in_threadpool(autofix_grounding, pending, ungrounded, **kwargs)
-            finally:
-                observe(observation, "grounding_repair_finished", repair_pass=0)
+            fixed = None
+            if grounding_repair_policy == "autofix_then_rewrite":
+                observe(observation, "grounding_repair_started", repair_pass=0)
+                try:
+                    fixed = await run_in_threadpool(
+                        autofix_grounding, pending, ungrounded, **kwargs
+                    )
+                finally:
+                    observe(observation, "grounding_repair_finished", repair_pass=0)
             if fixed is not None:
                 log.info(
                     "chat_grounding_autofixed",

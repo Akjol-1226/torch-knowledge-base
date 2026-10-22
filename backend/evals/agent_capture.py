@@ -19,7 +19,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from app.modules.chat.execution import execute_turn
+from app.modules.chat.execution import GroundingRepairPolicy, execute_turn
 from app.modules.chat.observation import TurnObservation
 from app.modules.chat.tools import current_kbs, use_read_view
 from evals.agent_artifacts import (
@@ -60,6 +60,7 @@ async def capture_case(
     repeat_index: int, runtime: Any, output: Path, timeout_seconds: float = 120,
     config: Any = None, store: Any = None,
     observation: TurnObservation | None = None,
+    grounding_repair_policy: GroundingRepairPolicy = "autofix_then_rewrite",
 ) -> RunRecord:
     """Persist the terminal even on cancellation, then propagate caller cancellation.
 
@@ -88,6 +89,7 @@ async def capture_case(
                 async for event in execute_turn(
                     runtime, [message.model_dump() for message in case.input.messages],
                     config or {}, observation=recorder,
+                    grounding_repair_policy=grounding_repair_policy,
                 ):
                     if event.get("type") == "chunk":
                         partial.append(event.get("text") or "")
@@ -135,6 +137,7 @@ async def capture_case(
         "reader_scope": "explicit_context_view" if store is not None else "configured_live_store",
         "observation_scope": "logical_invocation_boundaries_not_physical_attempts_or_tool_body",
         "persistence_included": False, "cost": None,
+        "grounding_repair_policy": grounding_repair_policy,
         "underlying_physical_work_stopped": None,
         "files": {name: file_sha256(private / name) for name in (
             "dataset.json", "plan.json", "runs.jsonl", "trace.json"
