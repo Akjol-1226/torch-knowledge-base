@@ -64,7 +64,9 @@ from evals.scoring.agent_quality import BoundReview, CaseGrade, score_case
 _INPUTS = ("dataset.json", "plan.json", "contract.json", "config.json", "schedule.json")
 _PACKAGES = ("pydantic", "langchain-core", "langchain-openai", "openai", "bm25s", "jieba", "numpy")
 _PROMPT = "app/modules/chat/prompts/system.md"
-WORKER_GRACE_SECONDS = 30
+# Frozen corpus verification and receipt publication are outside capture time.
+# Keep the same fixed setup allowance for both arms, without extending model time.
+WORKER_GRACE_SECONDS = 120
 
 
 class SharedConfig(StrictModel):
