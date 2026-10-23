@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # ReAct 图步数上限：一轮 = agent节点+tool节点各一步。默认 25 太小，回答"完整工序"需逐节点
     # 读全 section.span 时会撞上限报 GraphRecursionError / 答不全；这里放宽到 50。
     chat_recursion_limit: int = 50
+    # Native chat uses model rounds rather than graph steps. Keep the legacy
+    # setting above for callers still using the old graph factory.
+    chat_max_agent_rounds: int = 25
+    chat_tool_concurrency: int = 8
     # 对话 LLM 全局限速（requests/秒，进程内跨并发共享）。0 = 不限速。
     # 防瞬时打爆 LiteLLM Proxy 触发 429（与建树摘要并发闸门 summary_concurrency 互补）。
     chat_rate_limit_rps: float = 0.0

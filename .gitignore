@@ -12,6 +12,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+backend/evals/reports/**/private/
 
 # ---- 系统 / 编辑器 ----
 .DS_Store
